@@ -12,7 +12,7 @@ from xgboost import XGBClassifier
 
 from sklearn.metrics import (
     accuracy_score, f1_score, precision_score,
-    recall_score, confusion_matrix, log_loss
+    recall_score, confusion_matrix, log_loss,make_scorer
 )
 
 from sklearn.linear_model import(
@@ -27,6 +27,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from ORAN_Helper import Metric
 import joblib as jlb
+from sklearn.model_selection import GridSearchCV
 
 class MLP(nn.Module):
     def __init__(self, number_of_features = None, learning_rate=0.001, epochs=100, save_name = ""):
@@ -258,35 +259,68 @@ class Random_Forest():
         self.time_taken = model_data["time"]
 
 class Decision_Tree():
-    def __init__(self, random_state = 42, save_name = ""):
-        self.model = DecisionTreeClassifier(random_state=random_state)
-
+    def __init__(self, random_state=42, save_name="", cv=5):
+        self.random_state = random_state
         self.save_path = save_name + ".pkl"
+        self.cv = cv  # Number of folds for cross-validation
+        self.time_taken = None
+
     def fit_save(self, X_train, y_train):
         start_time = time.time()
-        self.model.fit(X_train, y_train)
+
+        # Define hyperparameter search space
+        param_grid = {
+            'max_depth': [5, 10, 15, 20, None],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 5],
+            'criterion': ['gini', 'entropy'],
+            'class_weight': [None, 'balanced']
+        }
+
+        # Use F1 Macro as scoring
+        scorer = make_scorer(f1_score, average='macro')
+
+        # Perform Grid Search CV
+        grid_search = GridSearchCV(
+            estimator=DecisionTreeClassifier(random_state=self.random_state),
+            param_grid=param_grid,
+            scoring=scorer,
+            cv=self.cv,
+            n_jobs=-1,
+            verbose=1
+        )
+
+        # Fit the model
+        grid_search.fit(X_train, y_train)
+        self.model = grid_search.best_estimator_
 
         end_time = time.time()
-
         self.time_taken = end_time - start_time
+
+        print(f"Best parameters: {grid_search.best_params_}")
+        print(f"Best macro F1-score: {grid_search.best_score_}")
 
         model_data = {
             "model": self.model,
             "time": self.time_taken
         }
 
-        jlb.dump(model_data,self.save_path)
+        jlb.dump(model_data, self.save_path)
+        print(f"Saved best model to {self.save_path}")
 
     def predict(self, X_test):
-        y_pred = self.model.predict(X_test)
-
-        return y_pred
+        return self.model.predict(X_test)
 
     def evaluate_and_get_metrics(self, X_test, y_test):
-        y_pred = self.predict(X_test=X_test)
+        y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
 
-        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken)
+        metrics = Metric(
+            accuracy=accuracy,
+            y_test=y_test,
+            y_pred=y_pred,
+            time_taken=self.time_taken
+        )
 
         return metrics
 

@@ -67,7 +67,7 @@ def main():
 
     # 6) Low-variance filter
     vt = VarianceThreshold(threshold=0.01)
-    data = pd.DataFrame(vt.fit_transform(data), columns=data.columns[vt.get_support()])
+    data = pd.DataFrame(vt.fit_transform(data), columns=data.columns[vt.get_support()],index=data.index)
 
     # 7) Correlation filter
     corr_matrix      = data.corr().round(4)
@@ -92,7 +92,6 @@ def main():
     # 10) Skipped Scaling
 
     # 11) Save
-    print("Saving the pre-processed dataset (without scaling)!")
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
 
