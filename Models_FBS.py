@@ -257,8 +257,6 @@ class Classifier(nn.Module):
     def __init__(self, encoded_dimension,number_of_classes):
         super(Classifier,self).__init__()
 
-        
-
         self.net = nn.Sequential(
             nn.Linear(encoded_dimension,16),
             nn.ReLU(),
@@ -298,83 +296,7 @@ class Autoencoder_Classifier():
             if epoch == 1 or epoch % print_num == 0 or epoch == epochs:
                 print(f"Epoch {epoch} ---->>>>>>>>>>, Loss: {loss.item():.4f}, Train Accuracy: {accuracy:.4f}")
                 print()
-
-
-
-class Autoencoder(nn.Module):
-    def __init__(self, input_dimension, encoded_dimension):
-        super(Autoencoder,self).__init__()
-
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dimension, 32),
-            nn.ReLU(),
-            nn.Linear(32,encoded_dimension)
-        )
-
-        self.decoder = nn.Sequential(
-            nn.Linear(encoded_dimension,32),
-            nn.ReLU(),
-            nn.Linear(32, input_dimension)
-        )
-    
-    def forward(self,x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-
-        return decoded
-    
-
-class Classifier(nn.Module):
-    def __init__(self, encoded_dimension,number_of_classes):
-        super(Classifier,self).__init__()
-
-        
-
-        self.net = nn.Sequential(
-            nn.Linear(encoded_dimension,16),
-            nn.ReLU(),
-            nn.Linear(16, number_of_classes)
-        )
-
-    def forward(self, x):
-        return self.net(x)
-
-
-class Autoencoder_Classifier():
-    def __init__(self, input_dimension, encoded_dimension,number_of_classes, learning_rate=0.01):
-        self.input_dimension = input_dimension
-        self.encoded_dimension = encoded_dimension
-        self.number_of_classes = number_of_classes
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print("Using device:", self.device)
-
-        self.autoencoder = Autoencoder(input_dimension=input_dimension,encoded_dimension=encoded_dimension).to(device=self.device)
-        self.classifier = Classifier(encoded_dimension=encoded_dimension,number_of_classes=number_of_classes).to(self.device)
-
-
-        self.ae_criterion = nn.MSELoss()
-        self.ae_optimizer = optim.Adam(self.autoencoder.parameters(), lr=learning_rate)
-
-    def fit_save(self, epochs = 100):
-        print_num = epochs // 10
-
-        start_time = time.time()
-
-        for epoch in range(1, epochs + 1):
-            self.autoencoder.train()
-            self.ae_optimizer.zero_grad()
-
-
-            if epoch == 1 or epoch % print_num == 0 or epoch == epochs:
-                print(f"Epoch {epoch} ---->>>>>>>>>>, Loss: {loss.item():.4f}, Train Accuracy: {accuracy:.4f}")
-                print()      
-
-class LSTM():
-    def __init__(self):
-        pass
-
-    
+   
 
 class LR():
     def __init__(self, save_name=""):
