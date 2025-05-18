@@ -27,7 +27,7 @@ import numpy as np
 import os
 import pandas as pd
 
-from Models import *
+from Models_FBS import *
 from ORAN_Helper import Processor
 
 save_folder_path = "Saved_Models"
