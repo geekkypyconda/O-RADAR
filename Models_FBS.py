@@ -28,6 +28,20 @@ import torch.optim as optim
 from ORAN_Helper import Metric
 import joblib as jlb
 
+import h5py
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential # type: ignore
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
+
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+print("\n\n\n<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>")
+print("TensorFlow version:", tf.__version__)
+print("GPU is", "available" if tf.config.list_physical_devices('GPU') else "NOT AVAILABLE")
+print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\n")
+
 class MLP(nn.Module):
     def __init__(self, number_of_features = None, learning_rate=0.001, epochs=100, save_name = ""):
         super(MLP, self).__init__()
@@ -128,6 +142,163 @@ class MLP(nn.Module):
 
         self.load_state_dict(model_data["model"])
         self.to(self.device)
+    
+
+class Simple_LSTM():
+    def __init__(self, timesteps = None, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
+        self.save_path = save_name + ".h5"
+        self.learning_rate = learning_rate
+        self.epochs = epochs
+        self.number_of_features = number_of_features
+        self.timesteps = timesteps
+
+        self.batch_size = batch_size
+
+        if save_name == "":
+            pass
+        else:
+            self._init_model_()
+
+    def _init_model_(self):
+        self.model = Sequential([
+            LSTM(50, activation='relu', return_sequences=True, input_shape=(self.timesteps, self.number_of_features)),
+            Dropout(0.2),
+            LSTM(32, activation='relu'),
+            Dropout(0.2),
+            Dense(1, activation='sigmoid') 
+        ])
+
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+
+    def transform_label(self, labels,sample_set_size):
+        y_seq = (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
+
+        return y_seq
+
+    def fit_save(self,X_train, y_train):
+        sample_set_size = X_train.shape[0] // self.timesteps
+
+        X_train = X_train[:sample_set_size * self.timesteps]
+        y_train = y_train[:sample_set_size * self.timesteps]
+
+        y_train = self.transform_label(labels=y_train, sample_set_size=sample_set_size)
+
+        X_train = X_train.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
+        start_time = time.time()
+
+        self.history = self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size)
+
+        end_time = time.time()
+
+        self.time_taken = end_time - start_time
+        
+        self.model.save(self.save_path)
+        
+        with h5py.File(self.save_path, "a") as file:
+            file.attrs["time"] = self.time_taken
+            file.attrs["timesteps"] = self.timesteps
+            file.attrs["num_features"] = self.number_of_features
+
+    def predict_proba(self, X_test):
+        return self.model.predict(X_test)
+
+    def predict(self, X_test):
+        probs = self.model.predict_proba(X_test)
+        return (probs > 0.5).astype(int)
+
+    def evaluate_and_get_metrics(self, X_test, y_test):
+        sample_set_size = X_test.shape[0] // self.timesteps
+        X_test = X_test[:sample_set_size * self.timesteps]
+        y_test = y_test[:sample_set_size * self.timesteps]
+
+        y_test = self.transform_label(labels = y_test, sample_set_size=sample_set_size)
+
+        X_test = X_test.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
+        y_pred = self.model.predict(X_test)
+        loss, acc = self.model.evaluate(X_test,y_test)
+
+        # Defining Metrics for this model
+        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
+
+        return self.metrics
+
+    def evaluation_mode(self, model_path):
+        self.model = tf.keras.models.load_model(model_path)
+
+        with h5py.File(model_path, "r") as file:
+            self.time_taken = file.attrs["time"]
+            self.timesteps = file.attrs["timesteps"]
+            self.number_of_features = file.attrs["num_features"]
+
+class Autoencoder(nn.Module):
+    def __init__(self, input_dimension, encoded_dimension):
+        super(Autoencoder,self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dimension, 32),
+            nn.ReLU(),
+            nn.Linear(32,encoded_dimension)
+        )
+
+        self.decoder = nn.Sequential(
+            nn.Linear(encoded_dimension,32),
+            nn.ReLU(),
+            nn.Linear(32, input_dimension)
+        )
+    
+    def forward(self,x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+
+        return decoded
+    
+
+class Classifier(nn.Module):
+    def __init__(self, encoded_dimension,number_of_classes):
+        super(Classifier,self).__init__()
+
+        
+
+        self.net = nn.Sequential(
+            nn.Linear(encoded_dimension,16),
+            nn.ReLU(),
+            nn.Linear(16, number_of_classes)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Autoencoder_Classifier():
+    def __init__(self, input_dimension, encoded_dimension,number_of_classes, learning_rate=0.01):
+        self.input_dimension = input_dimension
+        self.encoded_dimension = encoded_dimension
+        self.number_of_classes = number_of_classes
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print("Using device:", self.device)
+
+        self.autoencoder = Autoencoder(input_dimension=input_dimension,encoded_dimension=encoded_dimension).to(device=self.device)
+        self.classifier = Classifier(encoded_dimension=encoded_dimension,number_of_classes=number_of_classes).to(self.device)
+
+
+        self.ae_criterion = nn.MSELoss()
+        self.ae_optimizer = optim.Adam(self.autoencoder.parameters(), lr=learning_rate)
+
+    def fit_save(self, epochs = 100):
+        print_num = epochs // 10
+
+        start_time = time.time()
+
+        for epoch in range(1, epochs + 1):
+            self.autoencoder.train()
+            self.ae_optimizer.zero_grad()
+
+
+            if epoch == 1 or epoch % print_num == 0 or epoch == epochs:
+                print(f"Epoch {epoch} ---->>>>>>>>>>, Loss: {loss.item():.4f}, Train Accuracy: {accuracy:.4f}")
+                print()
+
 
 
 class Autoencoder(nn.Module):

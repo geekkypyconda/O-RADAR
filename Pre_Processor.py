@@ -3,7 +3,7 @@ This file will take the dataset and save the pre processed dataset into the fold
 Pre_Processed_Data_set
 
 You need to give the dataset path as arguments while running this file
-Example:  python3 Pre_Processor.py <name_of_the_dataset> yes/no <Name of the saved dataset>
+Example:  python3 Pre_Processor.py <path_of_the_dataset> yes/no <Name of the saved dataset>
 
 Note: If not name for the saved dataset is given then it will take the name from the original
 path of the dataset

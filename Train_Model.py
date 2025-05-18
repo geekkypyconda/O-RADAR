@@ -18,7 +18,10 @@ Models used:
 7. K-NN
 8. Naive Bayes
 9. MLP
-10. Statefull LSTM with Attention
+10. LSTM
+11. Statefull LSTM with Attention
+12. Autoencoder
+13. TabNet
 
 '''
 
@@ -43,7 +46,10 @@ models_mapping = {
     7: "K-NN",
     8: "Naive_Bayes",
     9: "MLP",
-    10: "Statefull_LSTM_with_Attention"
+    10: "LSTM",
+    11: "Stateful_Attention_LSTM",
+    12: "Autoencoder",
+    13: "TabNet"
 }
 
 def extract_dataset_name(dataset_path):
@@ -73,7 +79,7 @@ def run_model(model_num, dataset_path,X_train,y_train):
     elif model_num == 9:
         model = MLP(number_of_features=X_train.shape[1],learning_rate=0.01, save_name=save_name)
     elif model_num == 10:
-        model = LSTM()
+        model = Simple_LSTM(timesteps=10, number_of_features=X_train.shape[1],learning_rate=0.001,epochs=100, batch_size=32,save_name=save_name)
     
     if model_num == 4:
         model.fit_save(X_train=X_train)

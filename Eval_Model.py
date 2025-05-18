@@ -14,7 +14,10 @@ Models used:
 7. K-NN
 8. Naive Bayes
 9. MLP
-10. Statefull LSTM with Attention
+10. LSTM
+11. Statefull LSTM with Attention
+12. Autoencoder
+13. TabNet
 
 '''
 
@@ -39,7 +42,10 @@ models_mapping = {
     7: "K-NN",
     8: "Naive_Bayes",
     9: "MLP",
-    10: "Statefull_LSTM_with_Attention"
+    10: "LSTM",
+    11: "Stateful_Attention_LSTM",
+    12: "Autoencoder",
+    13: "TabNet"
 }
 
 reverse_models_mapping = {
@@ -52,7 +58,10 @@ reverse_models_mapping = {
     "K-NN": 7,
     "Naive_Bayes": 8,
     "MLP": 9,
-    "Statefull_LSTM_with_Attention": 10
+    "LSTM": 10,
+    "Stateful_Attention_LSTM": 11,
+    "Autoencoder": 12,
+    "TabNet": 13
 }
 
 def extract_dataset_name(dataset_path):
@@ -61,7 +70,7 @@ def extract_dataset_name(dataset_path):
     return file_name
 
 def extract_model_number(model_path):
-    l = model_path.split('@')[1][:-4]
+    l = model_path.split('@')[1].split(".")[0]
     
     return reverse_models_mapping[l]
 
@@ -86,7 +95,9 @@ def eval_model(model_num, model_path,X_test,y_test):
     elif model_num == 9:
         model = MLP()
     elif model_num == 10:
-        model = LSTM()
+        model = Simple_LSTM()
+    elif model_num >= 11:
+        pass
     
     # Put the model in evaluation mode
     model.evaluation_mode(model_path=model_path)
