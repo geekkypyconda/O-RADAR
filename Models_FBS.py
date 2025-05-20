@@ -260,7 +260,8 @@ class Classifier(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(encoded_dimension,16),
             nn.ReLU(),
-            nn.Linear(16, number_of_classes)
+            nn.Linear(16, 1),
+            nn.Sigmoid()
         )
 
     def forward(self, x):
@@ -268,35 +269,131 @@ class Classifier(nn.Module):
 
 
 class Autoencoder_Classifier():
-    def __init__(self, input_dimension, encoded_dimension,number_of_classes, learning_rate=0.01):
-        self.input_dimension = input_dimension
-        self.encoded_dimension = encoded_dimension
-        self.number_of_classes = number_of_classes
-
+    def __init__(self, X_train = -1, y_train = -1, input_dimension = -1, encoded_dimension = -1,number_of_classes = -1, autoencoder_learning_rate=0.01, save_name = ""):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
+        
+        if(input_dimension != -1):
+            self.input_dimension = input_dimension
+            self.encoded_dimension = encoded_dimension
+            self.number_of_classes = number_of_classes
+            self.X_train = X_train
 
-        self.autoencoder = Autoencoder(input_dimension=input_dimension,encoded_dimension=encoded_dimension).to(device=self.device)
-        self.classifier = Classifier(encoded_dimension=encoded_dimension,number_of_classes=number_of_classes).to(self.device)
+            self.save_path = save_name + ".pth"
 
+            self.autoencoder = Autoencoder(input_dimension=input_dimension,encoded_dimension=encoded_dimension).to(device=self.device)
+            self.classifier = Classifier(encoded_dimension=encoded_dimension,number_of_classes=number_of_classes).to(self.device)
+        
+            self.X_train_tensor = self.to_tensor(X_train)
+            self.y_train_tensor = self.to_tensor(y_train)
+       
 
+    def to_tensor(self, X,sample):
+        X = torch.tensor(X.to_numpy(), dtype=torch.float32).to(self.device)
+        return X
+
+    def train_autoencoder(self, epochs = 100, learning_rate = 0.001):
         self.ae_criterion = nn.MSELoss()
         self.ae_optimizer = optim.Adam(self.autoencoder.parameters(), lr=learning_rate)
-
-    def fit_save(self, epochs = 100):
         print_num = epochs // 10
-
         start_time = time.time()
 
         for epoch in range(1, epochs + 1):
             self.autoencoder.train()
             self.ae_optimizer.zero_grad()
-
+            reconstructed = self.autoencoder(self.X_train_tensor)
+            loss = self.ae_criterion(reconstructed,self.X_train_tensor)
+            loss.backward()
+            self.ae_optimizer.step()
 
             if epoch == 1 or epoch % print_num == 0 or epoch == epochs:
-                print(f"Epoch {epoch} ---->>>>>>>>>>, Loss: {loss.item():.4f}, Train Accuracy: {accuracy:.4f}")
+                print(f"Epoch {epoch} ---->>>>>>>>>>, Loss: {loss.item():.4f}")
                 print()
-   
+    
+        end_time = time.time()
+
+        self.autoencoder_time = end_time - start_time
+
+        # Freeze Autoencoder
+        for param in self.autoencoder.parameters():
+            param.requires_grad = False
+
+        self.encoded_train = self.autoencoder.encoder(self.X_train_tensor).detach()
+
+    def train_classifier(self, epochs = 100, learning_rate=0.001):
+        self.clf_criterion = nn.BCEWithLogitsLoss()
+        self.clf_optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
+        print_num = epochs // 10
+
+        start_time = time.time()
+
+        for epoch in range(1, epochs + 1):
+            self.classifier.train()
+            self.clf_optimizer.zero_grad()
+            outputs = self.classifier(self.encoded_train)
+            loss = self.clf_criterion(outputs,self.y_train_tensor)
+            loss.backward()
+            self.clf_optimizer.step()
+
+            # Calculate training accuracy
+            with torch.no_grad():
+                predictions_train = outputs.argmax(dim=1)
+                train_acc = accuracy_score(self.y_train_tensor.cpu().numpy(), predictions_train.cpu().numpy())
+
+            if epoch == 1 or epoch % print_num == 0 or epoch == epochs:
+                print(f"Epoch {epoch} ---->>>>>>>>>>, Loss: {loss.item():.4f}, Training Accuracy: {train_acc}")
+                print()
+
+        end_time = time.time()
+
+        self.clf_time = end_time - start_time
+        self.time_taken = self.clf_time + self.autoencoder_time
+
+    def save_model(self):
+        model_data = {
+            "autoencoder": self.autoencoder.state_dict(),
+            "classifier": self.classifier.state_dict(),
+            "time": self.time_taken,
+            "input_dim":self.input_dimension,
+            "encoded_dimension": self.encoded_dimension,
+            "num_classes": self.number_of_classes
+        }
+        
+        torch.save(model_data, self.save_path)
+
+
+    def evaluate_and_get_metrics(self, X_test, y_test):
+        X_test_tensor = self.to_tensor(X=X_test)
+        y_test_tensor = self.to_tensor(X=y_test)
+
+        with torch.no_grad():
+            encoded_output = self.autoencoder.encoder(X_test_tensor)
+            y_pred = self.classifier(encoded_output).argmax(dim=1)
+
+        accuracy = accuracy_score(y_test_tensor.cpu().numpy(), y_pred.cpu().numpy())
+
+        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken)
+
+        return metrics
+
+    def evaluation_mode(self, model_path):
+        model_data = torch.load(model_path)
+
+        self.loaded_autoencoder = Autoencoder
+
+        self.input_dimension = model_data["input_dim"]
+        self.encoded_dimension = model_data["encoded_dimension"]
+        self.time_taken = model_data["time"]
+        self.number_of_classes = model_data["num_classes"]
+
+        self.autoencoder = Autoencoder(self.input_dimension,self.encoded_dimension).to(self.device)
+        self.autoencoder.load_state_dict(model_data["autoencoder"])
+        self.autoencoder.eval()
+
+        self.classifier = Classifier(encoded_dimension=self.encoded_dimension, number_of_classes=self.number_of_classes)
+        self.classifier.load_state_dict(model_data["classfier"])
+        self.classifier.eval()
+
 
 class LR():
     def __init__(self, save_name=""):

@@ -59,6 +59,9 @@ def extract_dataset_name(dataset_path):
 
 def run_model(model_num, dataset_path,X_train,y_train):
     model = None
+    input_dimension = X_train.shape[1]
+    number_of_classes = len(np.unique(y_train))
+
     save_name = save_folder_path + "/" + extract_dataset_name(dataset_path) + "@" + models_mapping[model_num]
     if model_num == 1:
         model = LR(save_name=save_name)
@@ -80,9 +83,15 @@ def run_model(model_num, dataset_path,X_train,y_train):
         model = MLP(number_of_features=X_train.shape[1],learning_rate=0.01, save_name=save_name)
     elif model_num == 10:
         model = Simple_LSTM(timesteps=10, number_of_features=X_train.shape[1],learning_rate=0.001,epochs=100, batch_size=32,save_name=save_name)
-    
+    elif model_num == 12:
+        model = Autoencoder_Classifier(X_train=X_train,y_train=y_train,input_dimension=input_dimension, encoded_dimension=24, number_of_classes=number_of_classes)
+
     if model_num == 4:
         model.fit_save(X_train=X_train)
+    elif model_num == 12:
+        model.train_autoencoder(epochs=100,learning_rate=0.01)
+        model.train_classifier(epochs=100,learning_rate=0.01)
+        model.save_model()
     else:
         model.fit_save(X_train=X_train,y_train=y_train)
 
