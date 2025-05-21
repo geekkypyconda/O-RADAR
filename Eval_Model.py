@@ -106,13 +106,29 @@ def main():
     model_path = sys.argv[2]
     dataset = pd.read_csv(dataset_path)
 
+        # Derive filename from dataset_path or override
+    base_filename = os.path.splitext(os.path.basename(dataset_path))[0]
+    if len(sys.argv) == 4:
+        base_filename = os.path.splitext(sys.argv[3])[0]
+
+    # Load dataset
+    dataset = pd.read_csv(dataset_path)
     data, labels = processor.separate_label(data=dataset, label_name="label")
+    X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=0.2, random_state=42)
 
-    X_train, X_test, y_train, y_test = train_test_split(data,labels, test_size=0.2, random_state=42)
 
+    # Load the trained scaler
+    scaler_path = os.path.join("Saved_Models", f"{base_filename}_scaler.pkl")
+    scaler = jlb.load(scaler_path)
+
+    # Transform test data
+    X_test_scaled = scaler.transform(X_test)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
+
+    # Evaluate the model
     model_num = extract_model_number(model_path=model_path)
     print(f"Evaluating on Model: {models_mapping[model_num]}")
-    eval_model(model_num=model_num, model_path=model_path,X_test=X_test, y_test=y_test)
+    eval_model(model_num=model_num, model_path=model_path, X_test=X_test_scaled, y_test=y_test)
 
 
 if __name__ == "__main__":

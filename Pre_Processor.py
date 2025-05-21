@@ -1,16 +1,3 @@
-"""
-This file will take the dataset and save the pre processed dataset into the folder
-Pre_Processed_Data_set
-
-You need to give the dataset path as arguments while running this file
-Example:  python3 Pre_Processor.py <name_of_the_dataset> yes/no <Name of the saved dataset>
-
-Note: If not name for the saved dataset is given then it will take the name from the original
-path of the dataset
-
-Pre_Processing Info:
-
-"""
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -19,6 +6,7 @@ import missingno as msno
 import importlib
 import sys
 import os
+import joblib
 
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.feature_selection import VarianceThreshold, mutual_info_classif
@@ -51,12 +39,13 @@ def main():
     else:
         print("Not Dropping Duplicates!\n")
 
+    print("Unique labels before replacing -1:", dataset["label"].unique())
     # 3) Sentinel → NaN
     dataset.replace(-1, np.nan, inplace=True)
 
     # 4) Separate features & label
     data, labels = processor.separate_label(data=dataset, label_name="label")
-
+    print("Count of NaNs in labels :", labels.isna().sum())
     # 5) Impute missing
     numeric_cols     = data.select_dtypes(include=[np.number]).columns
     categorical_cols = data.select_dtypes(include=['object', 'category']).columns
@@ -83,23 +72,27 @@ def main():
     keep_cols = mi_series[mi_series > 0.01].index
     data_processed = data_processed[keep_cols]
 
-    # 9) Re-attach label
-    final_data = data_processed.copy()
-    final_data["label"] = labels
-
-    print(f"\nFinal Shape of dataset after feature selection: {final_data.shape}\n")
-
-    # 10) Skipped Scaling
-
-    # 11) Save
+    
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
-
     fn = extract_dataset_name()
-    if len(sys.argv) == 4:
-        fn = sys.argv[3]
+    
+
+    # 10) Re-attach label
+    final_data = data_processed .copy()
+    print("Count of NaNs in labels :", labels.isna().sum())
+    # labels = labels.loc[data_scaled.index]
+    final_data["label"] = labels
+    print("Unique labels before replacing -1:", dataset["label"].unique())
+    print("Count of NaNs in final_label:", final_data["label"].isna().sum())
+
+
+    print(f"\nFinal Shape of dataset after scaling and feature selection: {final_data.shape}\n")
+
+    # 11) Save processed dataset
     save_path = os.path.join(folder_path, fn)
     final_data.to_csv(save_path, index=False)
+    print(f"Pre-processed dataset saved to: {save_path}")
 
 if __name__ == "__main__":
     main()

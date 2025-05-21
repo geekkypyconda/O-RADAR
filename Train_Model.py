@@ -26,6 +26,9 @@ import sys
 import numpy as np
 import os
 import pandas as pd
+import joblib
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+
 
 from Models import *
 from ORAN_Helper import Processor
@@ -63,11 +66,11 @@ def run_model(model_num, dataset_path,X_train,y_train):
     elif model_num == 4:
         model = Isolation_Forest(number_of_trees=100, contamination=0.1, save_name=save_name)
     elif model_num == 5:
-        model = Support_Vector_Machine(kernel="sigmoid",save_name=save_name)
+        model = Support_Vector_Machine(save_name=save_name)
     elif model_num == 6:
-        model = XGBoost(number_of_trees=100, learning_rate=0.01, save_name=save_name)
+        model = XGBoost( save_name=save_name)
     elif model_num == 7:
-        model = K_Nearest_Neighbor(neighbors=10,save_name=save_name)
+        model = K_Nearest_Neighbor(save_name=save_name)
     elif model_num == 8:
         model = NavieBayes(save_name=save_name)
     elif model_num == 9:
@@ -95,12 +98,30 @@ def main():
 
     X_train, X_test, y_train, y_test = train_test_split(data,labels, test_size=0.2, random_state=42)
 
+    # 9) Scaling
+    scaler = StandardScaler()
+    data_scaled = scaler.fit_transform(X_train)
+    # data_scaled = pd.DataFrame(data_scaled, columns=data_processed.columns)
+    data_scaled = pd.DataFrame(data_scaled, columns=X_train.columns, index=X_train.index)
+
+    folder_path  = "Saved_Models"
+    # Save the scaler
+    if not os.path.exists(folder_path):
+        os.mkdir(folder_path)
+    fn = os.path.splitext(os.path.basename(dataset_path))[0]
+    if len(sys.argv) == 4:
+        fn = sys.argv[3]
+    scaler_path = os.path.join(folder_path, f"{os.path.splitext(fn)[0]}_scaler.pkl")
+    joblib.dump(scaler, scaler_path)
+    print(f"Scaler saved to: {scaler_path}")
+
+    
     l = list(sys.argv[2:])
 
     for i in l:
         model_num = int(i)
         print(f"Training on Model: {models_mapping[model_num]}")
-        run_model(model_num=model_num,dataset_path=dataset_path,X_train=X_train,y_train=y_train)
+        run_model(model_num=model_num,dataset_path=dataset_path,X_train=data_scaled,y_train=y_train)
 
         print()
 
