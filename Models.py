@@ -401,6 +401,9 @@ class Autoencoder_Classifier():
         self.classifier.eval()
 
 
+class TabNet_Classifier():
+    pass
+
 class LR():
     def __init__(self, save_name=""):
         self.save_name = save_name
