@@ -281,15 +281,19 @@ class Autoencoder_Classifier():
 
             self.save_path = save_name + ".pth"
 
-            self.autoencoder = Autoencoder(input_dimension=input_dimension,encoded_dimension=encoded_dimension).to(device=self.device)
+            self.autoencoder = Autoencoder(input_dimension=input_dimension,encoded_dimension=encoded_dimension).to(self.device)
             self.classifier = Classifier(encoded_dimension=encoded_dimension,number_of_classes=number_of_classes).to(self.device)
         
-            self.X_train_tensor = self.to_tensor(X_train)
-            self.y_train_tensor = self.to_tensor(y_train)
+            self.X_train_tensor = self.to_tensor(X_train, False)
+            self.y_train_tensor = self.to_tensor(y_train, isLabel=True)
        
 
-    def to_tensor(self, X,sample):
-        X = torch.tensor(X.to_numpy(), dtype=torch.float32).to(self.device)
+    def to_tensor(self, X,isLabel):
+        if isLabel == True:
+            X = torch.tensor(X.to_numpy(), dtype=torch.float32).view(-1, 1).to(self.device)
+        else:
+            X = torch.tensor(X.to_numpy(), dtype=torch.float32).to(self.device)
+
         return X
 
     def train_autoencoder(self, epochs = 100, learning_rate = 0.001):
@@ -363,14 +367,16 @@ class Autoencoder_Classifier():
 
 
     def evaluate_and_get_metrics(self, X_test, y_test):
-        X_test_tensor = self.to_tensor(X=X_test)
-        y_test_tensor = self.to_tensor(X=y_test)
+        X_test_tensor = self.to_tensor(X=X_test, isLabel=False)
+        y_test_tensor = self.to_tensor(X=y_test, isLabel=True)
 
         with torch.no_grad():
             encoded_output = self.autoencoder.encoder(X_test_tensor)
-            y_pred = self.classifier(encoded_output).argmax(dim=1)
+            y_pred_tensor = (self.classifier(encoded_output) > 0.5).float()
 
-        accuracy = accuracy_score(y_test_tensor.cpu().numpy(), y_pred.cpu().numpy())
+        y_pred = y_pred_tensor.cpu().numpy().astype(int)
+
+        accuracy = accuracy_score(y_test_tensor.cpu().numpy(), y_pred_tensor.cpu().numpy())
 
         metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken)
 
@@ -390,8 +396,8 @@ class Autoencoder_Classifier():
         self.autoencoder.load_state_dict(model_data["autoencoder"])
         self.autoencoder.eval()
 
-        self.classifier = Classifier(encoded_dimension=self.encoded_dimension, number_of_classes=self.number_of_classes)
-        self.classifier.load_state_dict(model_data["classfier"])
+        self.classifier = Classifier(encoded_dimension=self.encoded_dimension, number_of_classes=self.number_of_classes).to(self.device)
+        self.classifier.load_state_dict(model_data["classifier"])
         self.classifier.eval()
 
 
