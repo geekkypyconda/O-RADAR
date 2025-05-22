@@ -25,9 +25,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from pytorch_tabnet.tab_model import TabNetClassifier
 from ORAN_Helper import Metric
 import joblib as jlb
 from sklearn.model_selection import GridSearchCV
+
+
+import h5py
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential # type: ignore
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
+
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
+print("\n\n\n<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>")
+print("TensorFlow version:", tf.__version__)
+print("GPU is", "available" if tf.config.list_physical_devices('GPU') else "NOT AVAILABLE")
+print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\n")
+
 class MLP(nn.Module):
     def __init__(self, number_of_features=None, learning_rate=0.001, epochs=100, save_name="", cv=5):
         super(MLP, self).__init__()
@@ -277,7 +294,7 @@ class Autoencoder(nn.Module):
 
         return decoded
     
-    
+
 class Classifier(nn.Module):
     def __init__(self, encoded_dimension,number_of_classes):
         super(Classifier,self).__init__()
