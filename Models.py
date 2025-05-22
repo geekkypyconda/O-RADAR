@@ -25,6 +25,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from pytorch_tabnet.tab_model import TabNetClassifier
+
 from ORAN_Helper import Metric
 import joblib as jlb
 
@@ -402,7 +404,37 @@ class Autoencoder_Classifier():
 
 
 class TabNet_Classifier():
-    pass
+    def __init__(self, save_name = ""):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print("Using device: ", self.device)
+    
+        self.save_path = save_name
+
+        self.clf = TabNetClassifier(
+            device_name=self.device.type,
+            n_d=16,n_a=16,
+            n_steps=10,
+            gamma=1.5,
+            lambda_sparse=1e-4,
+            optimizer_fn=torch.optim.Adam,
+            optimizer_params=dict(lr=2e-2),
+            scheduler_params={"step_size":10, "gamma":0.9},
+            scheduler_fn=torch.optim.lr_scheduler.StepLR,
+            verbose=1
+        )
+
+    def fit_save(self, X_train,y_train,X_test,y_test, epochs,early_stopping_threshold,):
+        self.clf.fit(
+            X_train=X_train, y_train=y_train,
+            eval_set=[(X_test, y_test)],
+            eval_name=['test'],
+            eval_metric=['accuracy'],
+            max_epochs=100,
+            patience=15,
+            batch_size=256,
+            virtual_batch_size=128,
+            num_workers=0
+        )
 
 class LR():
     def __init__(self, save_name=""):
