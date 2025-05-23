@@ -408,22 +408,25 @@ class TabNet_Classifier():
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device: ", self.device)
     
-        self.save_path = save_name
+        self.save_path = save_name + ".pkl"
 
-        self.clf = TabNetClassifier(
-            device_name=self.device.type,
-            n_d=16,n_a=16,
-            n_steps=10,
-            gamma=1.5,
-            lambda_sparse=1e-4,
-            optimizer_fn=torch.optim.Adam,
-            optimizer_params=dict(lr=2e-2),
-            scheduler_params={"step_size":10, "gamma":0.9},
-            scheduler_fn=torch.optim.lr_scheduler.StepLR,
-            verbose=1
-        )
+        if save_name != "":
+            self.clf = TabNetClassifier(
+                device_name=self.device.type,
+                n_d=16,n_a=16,
+                n_steps=10,
+                gamma=1.5,
+                lambda_sparse=1e-4,
+                optimizer_fn=torch.optim.Adam,
+                optimizer_params=dict(lr=2e-2),
+                scheduler_params={"step_size":10, "gamma":0.9},
+                scheduler_fn=torch.optim.lr_scheduler.StepLR,
+                verbose=1
+            )
 
     def fit_save(self, X_train,y_train,X_test,y_test, epochs,early_stopping_threshold,):
+        start_time = time.time()
+
         self.clf.fit(
             X_train=X_train, y_train=y_train,
             eval_set=[(X_test, y_test)],
@@ -435,6 +438,39 @@ class TabNet_Classifier():
             virtual_batch_size=128,
             num_workers=0
         )
+
+        end_time = time.time()
+        time_taken = end_time - start_time
+
+        model_data = {
+            "model_state_dict": self.clf.network.state_dict(),
+            "params": self.clf.get_params(),
+            "time": time_taken
+        }
+
+        jlb.dump(model_data,self.save_path)
+
+    def predict(self,X):
+        return self.clf.predict(X)
+
+    def evaluate_and_get_metrics(self, X_test, y_test):
+        y_pred = self.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+
+        # Defining Metrics for this model
+        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
+
+        return self.metrics
+
+    def evaluation_mode(self, model_path):
+        model_data = jlb.load(model_path)
+        clf = TabNetClassifier(model_data["params"])
+        clf.network.load_state_dict(model_data["model_state_dict"])
+
+        self.time_taken = model_data["time"]
+
+        self.to(self.device)
+
 
 class LR():
     def __init__(self, save_name=""):
