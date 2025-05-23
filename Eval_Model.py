@@ -98,7 +98,9 @@ def eval_model(model_num, model_path,X_test,y_test):
         model = Simple_LSTM()
     elif model_num == 12:
         model = Autoencoder_Classifier()
-    elif model_num == 11 or  model_num == 13:
+    elif model_num == 13:
+        model = TabNet_Classifier()
+    elif model_num == 11:
         pass
     
     # Put the model in evaluation mode

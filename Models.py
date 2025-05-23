@@ -404,7 +404,7 @@ class Autoencoder_Classifier():
 
 
 class TabNet_Classifier():
-    def __init__(self, save_name = ""):
+    def __init__(self, n_steps=10, n_d=16, n_a=16,save_name = ""):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device: ", self.device)
     
@@ -413,8 +413,8 @@ class TabNet_Classifier():
         if save_name != "":
             self.clf = TabNetClassifier(
                 device_name=self.device.type,
-                n_d=16,n_a=16,
-                n_steps=10,
+                n_d=n_d,n_a=n_a,
+                n_steps=n_steps,
                 gamma=1.5,
                 lambda_sparse=1e-4,
                 optimizer_fn=torch.optim.Adam,
@@ -424,16 +424,16 @@ class TabNet_Classifier():
                 verbose=1
             )
 
-    def fit_save(self, X_train,y_train,X_test,y_test, epochs,early_stopping_threshold,):
+    def fit_save(self, X_train,y_train,X_test,y_test, epochs,early_stopping_threshold):
         start_time = time.time()
 
         self.clf.fit(
-            X_train=X_train, y_train=y_train,
-            eval_set=[(X_test, y_test)],
+            X_train=X_train.values, y_train=y_train.values,
+            eval_set=[(X_test.values, y_test.values)],
             eval_name=['test'],
             eval_metric=['accuracy'],
-            max_epochs=100,
-            patience=15,
+            max_epochs=epochs,
+            patience=early_stopping_threshold,
             batch_size=256,
             virtual_batch_size=128,
             num_workers=0
@@ -443,7 +443,7 @@ class TabNet_Classifier():
         time_taken = end_time - start_time
 
         model_data = {
-            "model_state_dict": self.clf.network.state_dict(),
+            "model_object": self.clf,
             "params": self.clf.get_params(),
             "time": time_taken
         }
@@ -454,7 +454,7 @@ class TabNet_Classifier():
         return self.clf.predict(X)
 
     def evaluate_and_get_metrics(self, X_test, y_test):
-        y_pred = self.predict(X_test)
+        y_pred = self.predict(X_test.values)
         acc = accuracy_score(y_test, y_pred)
 
         # Defining Metrics for this model
@@ -464,12 +464,9 @@ class TabNet_Classifier():
 
     def evaluation_mode(self, model_path):
         model_data = jlb.load(model_path)
-        clf = TabNetClassifier(model_data["params"])
-        clf.network.load_state_dict(model_data["model_state_dict"])
+        self.clf = model_data["model_object"]
 
         self.time_taken = model_data["time"]
-
-        self.to(self.device)
 
 
 class LR():

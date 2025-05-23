@@ -57,7 +57,7 @@ def extract_dataset_name(dataset_path):
 
     return file_name
 
-def run_model(model_num, dataset_path,X_train,y_train):
+def run_model(model_num, dataset_path,X_train,y_train,X_test,y_test):
     model = None
     input_dimension = X_train.shape[1]
     number_of_classes = len(np.unique(y_train))
@@ -94,6 +94,8 @@ def run_model(model_num, dataset_path,X_train,y_train):
         model.train_autoencoder(epochs=100,learning_rate=0.01)
         model.train_classifier(epochs=100,learning_rate=0.01)
         model.save_model()
+    elif model_num == 13:
+        model.fit_save(X_train=X_train,y_train=y_train,X_test=X_test,y_test=y_test,epochs=100,early_stopping_threshold=15)
     else:
         model.fit_save(X_train=X_train,y_train=y_train)
 
@@ -117,7 +119,7 @@ def main():
     for i in l:
         model_num = int(i)
         print(f"Training on Model: {models_mapping[model_num]}")
-        run_model(model_num=model_num,dataset_path=dataset_path,X_train=X_train,y_train=y_train)
+        run_model(model_num=model_num,dataset_path=dataset_path,X_train=X_train,y_train=y_train,X_test=X_test,y_test=y_test)
 
         print()
 
