@@ -63,10 +63,14 @@ reverse_models_mapping = {
 
 def extract_dataset_name(dataset_path):
     file_name = os.path.basename(dataset_path)
-
+    
     return file_name
 
 def extract_model_number(model_path):
+
+       # Check extension-based identification first
+    if model_path.endswith(".h5"):
+        return reverse_models_mapping["LSTM"]
     l = model_path.split('@')[1][:-4]
     
     return reverse_models_mapping[l]

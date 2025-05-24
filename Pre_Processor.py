@@ -76,7 +76,8 @@ def main():
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
     fn = extract_dataset_name()
-    
+    if len(sys.argv) == 4:
+        fn = sys.argv[3]
 
     # 10) Re-attach label
     final_data = data_processed .copy()
