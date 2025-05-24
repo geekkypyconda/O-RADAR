@@ -80,9 +80,9 @@ def run_model(model_num, dataset_path,X_train,y_train,X_test,y_test):
     elif model_num == 8:
         model = NavieBayes(save_name=save_name)
     elif model_num == 9:
-        model = MLP(number_of_features=X_train.shape[1],learning_rate=0.01, save_name=save_name)
-    elif model_num == 10:
-        model = Simple_LSTM(timesteps=10, number_of_features=X_train.shape[1],learning_rate=0.001,epochs=100, batch_size=32,save_name=save_name)
+        model = MLP(number_of_features=X_train.shape[1],learning_rate=0.001, save_name=save_name)
+    elif model_num == 10: # We have to give 1 timestep, because our dataset is like that only
+        model = Simple_LSTM(timesteps=1, number_of_features=X_train.shape[1],learning_rate=0.01,epochs=100, batch_size=32,save_name=save_name)
     elif model_num == 12:
         model = Autoencoder_Classifier(X_train=X_train,y_train=y_train,input_dimension=input_dimension, encoded_dimension=24, number_of_classes=number_of_classes, save_name=save_name)
     elif model_num == 13:
@@ -115,6 +115,11 @@ def main():
     X_train, X_test, y_train, y_test = train_test_split(data,labels, test_size=0.2, random_state=42)
 
     l = list(sys.argv[2:])
+
+    print("\n\n-----------------------------------------------")
+    print(f"Training Set dimensions: {X_train.shape}")
+    print(f"Testing Set dimensions: {X_test.shape}")
+    print("-----------------------------------------------\n\n")
 
     for i in l:
         model_num = int(i)

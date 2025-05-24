@@ -35,7 +35,8 @@ import h5py
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential # type: ignore
-from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input, BatchNormalization # type: ignore
+from tensorflow.keras.regularizers import l2 # type: ignore
 
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
@@ -62,6 +63,7 @@ class MLP(nn.Module):
 
         if number_of_features is not None:
             self._init_model_()
+            print(f"---->>>>>>> Using device: {self.device}")
 
     def _init_model_(self):
         self.model = nn.Sequential(
@@ -215,7 +217,7 @@ class MLP(nn.Module):
 
 
 class Simple_LSTM():
-    def __init__(self, timesteps = None, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
+    def __init__(self, timesteps = 1, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
         self.save_path = save_name + ".h5"
         self.learning_rate = learning_rate
         self.epochs = epochs
@@ -231,11 +233,15 @@ class Simple_LSTM():
 
     def _init_model_(self):
         self.model = Sequential([
-            LSTM(50, activation='relu', return_sequences=True, input_shape=(self.timesteps, self.number_of_features)),
-            Dropout(0.2),
-            LSTM(32, activation='relu'),
-            Dropout(0.2),
-            Dense(1, activation='sigmoid') 
+            LSTM(64, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01), input_shape=(self.timesteps, self.number_of_features)),
+            BatchNormalization(),
+            Dropout(0.4),  # Dropout to prevent overfitting
+
+            LSTM(32, activation='relu', kernel_regularizer=l2(0.01)),
+            BatchNormalization(),
+            Dropout(0.3),  # Dropout after second LSTM layer
+
+            Dense(1, activation='sigmoid')  # Output layer for binary classification
         ])
 
         self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
@@ -246,14 +252,8 @@ class Simple_LSTM():
         return y_seq
 
     def fit_save(self,X_train, y_train):
-        sample_set_size = X_train.shape[0] // self.timesteps
+        X_train = X_train.to_numpy().reshape((X_train.shape[0],self.timesteps,X_train.shape[1]))        
 
-        X_train = X_train[:sample_set_size * self.timesteps]
-        y_train = y_train[:sample_set_size * self.timesteps]
-
-        y_train = self.transform_label(labels=y_train, sample_set_size=sample_set_size)
-
-        X_train = X_train.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
         start_time = time.time()
 
         self.history = self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size)
@@ -273,18 +273,13 @@ class Simple_LSTM():
         return self.model.predict(X_test)
 
     def predict(self, X_test):
-        probs = self.model.predict_proba(X_test)
+        probs = self.model.predict(X_test)
         return (probs > 0.5).astype(int)
 
     def evaluate_and_get_metrics(self, X_test, y_test):
-        sample_set_size = X_test.shape[0] // self.timesteps
-        X_test = X_test[:sample_set_size * self.timesteps]
-        y_test = y_test[:sample_set_size * self.timesteps]
+        X_test = X_test.to_numpy().reshape((X_test.shape[0],self.timesteps,X_test.shape[1]))
+        y_pred = self.predict(X_test)
 
-        y_test = self.transform_label(labels = y_test, sample_set_size=sample_set_size)
-
-        X_test = X_test.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
-        y_pred = self.model.predict(X_test)
         loss, acc = self.model.evaluate(X_test,y_test)
 
         # Defining Metrics for this model

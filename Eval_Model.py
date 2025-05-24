@@ -125,6 +125,11 @@ def main():
 
     X_train, X_test, y_train, y_test = train_test_split(data,labels, test_size=0.2, random_state=42)
 
+    print("\n\n-----------------------------------------------")
+    print(f"Training Set dimensions: {X_train.shape}")
+    print(f"Testing Set dimensions: {X_test.shape}")
+    print("-----------------------------------------------\n\n")
+
     model_num = extract_model_number(model_path=model_path)
     print(f"Evaluating on Model: {models_mapping[model_num]}")
     eval_model(model_num=model_num, model_path=model_path,X_test=X_test, y_test=y_test)

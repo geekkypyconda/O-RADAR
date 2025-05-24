@@ -1,3 +1,8 @@
+'''
+Command: python3 Pre_Processor.py <yes/no> FBSDetector/dataset/<dataset_name>
+'''
+
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
