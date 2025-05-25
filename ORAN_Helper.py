@@ -389,12 +389,12 @@ class Plotter():
 
 
 class Metric():
-    def __init__(self, accuracy, y_test, y_pred , time_taken):
+    def __init__(self, accuracy, y_test, y_pred, time_taken, num_labels):
         self.accuracy = accuracy
         self.time_taken = time_taken
-        self.f1 = f1_score(y_test, y_pred)
-        self.precision = precision_score(y_test, y_pred)
-        self.recall = recall_score(y_test, y_pred)
+        self.f1 = f1_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
+        self.precision = precision_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
+        self.recall = recall_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
         self.cf_matrix = confusion_matrix(y_test, y_pred)
         self.macro_f1 = f1_score(y_test, y_pred, average='macro')
 

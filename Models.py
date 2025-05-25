@@ -217,12 +217,14 @@ class MLP(nn.Module):
 
 
 class Simple_LSTM():
-    def __init__(self, timesteps = 1, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
+    def __init__(self, num_labels=-1, timesteps = 1, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = "", classification_type = "binary"):
         self.save_path = save_name + ".h5"
         self.learning_rate = learning_rate
         self.epochs = epochs
         self.number_of_features = number_of_features
         self.timesteps = timesteps
+        self.classification_type = classification_type
+        self.num_labels = num_labels
 
         self.batch_size = batch_size
 
@@ -232,19 +234,34 @@ class Simple_LSTM():
             self._init_model_()
 
     def _init_model_(self):
-        self.model = Sequential([
-            LSTM(64, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01), input_shape=(self.timesteps, self.number_of_features)),
-            BatchNormalization(),
-            Dropout(0.4),  # Dropout to prevent overfitting
+        if(self.classification_type == "binary"):
+            self.model = Sequential([
+                LSTM(64, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01), input_shape=(self.timesteps, self.number_of_features)),
+                BatchNormalization(),
+                Dropout(0.4),  # Dropout to prevent overfitting
 
-            LSTM(32, activation='relu', kernel_regularizer=l2(0.01)),
-            BatchNormalization(),
-            Dropout(0.3),  # Dropout after second LSTM layer
+                LSTM(32, activation='relu', kernel_regularizer=l2(0.01)),
+                BatchNormalization(),
+                Dropout(0.3),  # Dropout after second LSTM layer
 
-            Dense(1, activation='sigmoid')  # Output layer for binary classification
-        ])
+                Dense(1, activation='sigmoid')  # Output layer for binary classification
+            ])
 
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+            self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+        else:
+            self.model = Sequential([
+                LSTM(128, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01), input_shape=(self.timesteps, self.number_of_features)),
+                BatchNormalization(),
+                Dropout(0.4),  
+
+                LSTM(64, activation='relu', kernel_regularizer=l2(0.01)),
+                BatchNormalization(),
+                Dropout(0.3), 
+
+                Dense(self.num_labels, activation='softmax')  
+            ])
+
+            self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
     def transform_label(self, labels,sample_set_size):
         y_seq = (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
@@ -268,13 +285,17 @@ class Simple_LSTM():
             file.attrs["time"] = self.time_taken
             file.attrs["timesteps"] = self.timesteps
             file.attrs["num_features"] = self.number_of_features
+            file.attrs["num_classes"] = self.num_labels
 
     def predict_proba(self, X_test):
         return self.model.predict(X_test)
 
     def predict(self, X_test):
-        probs = self.model.predict(X_test)
-        return (probs > 0.5).astype(int)
+        probs = self.predict_proba(X_test)
+        if(self.num_labels == 2):
+            return (probs > 0.5).astype(int)
+        else:
+            return np.argmax(probs,axis=1)
 
     def evaluate_and_get_metrics(self, X_test, y_test):
         X_test = X_test.to_numpy().reshape((X_test.shape[0],self.timesteps,X_test.shape[1]))
@@ -282,8 +303,10 @@ class Simple_LSTM():
 
         loss, acc = self.model.evaluate(X_test,y_test)
 
+        print(f"Num Labels: {self.num_labels}")
+
         # Defining Metrics for this model
-        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
+        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken,num_labels=self.num_labels)
 
         return self.metrics
 
@@ -294,6 +317,7 @@ class Simple_LSTM():
             self.time_taken = file.attrs["time"]
             self.timesteps = file.attrs["timesteps"]
             self.number_of_features = file.attrs["num_features"]
+            self.num_labels = file.attrs["num_classes"]
 
 class Autoencoder(nn.Module):
     def __init__(self, input_dimension, encoded_dimension):

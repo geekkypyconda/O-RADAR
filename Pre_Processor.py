@@ -81,6 +81,8 @@ def main():
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
     fn = extract_dataset_name()
+    fn = fn + "_" + drop_dup
+
     if len(sys.argv) == 4:
         fn = sys.argv[3]
 
