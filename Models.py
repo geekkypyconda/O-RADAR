@@ -46,10 +46,189 @@ print("GPU is", "available" if tf.config.list_physical_devices('GPU') else "NOT 
 print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\n")
 
 
+class MLP(nn.Module):
+    def __init__(self, number_of_features=None, num_classes=2, learning_rate=0.001, epochs=100, save_name="", cv=5):
+        super(MLP, self).__init__()
+        self.input_dimension = number_of_features
+        self.num_classes = num_classes
+        self.epochs = epochs
+        self.save_path = save_name + ".pth"
+        self.learning_rate = learning_rate
+        self.cv = cv
+        self.threshold = 0.5
+        self.time_taken = None
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if number_of_features is not None:
+            self._init_model_()
 
+    def _init_model_(self):
+        output_dim = 1 if self.num_classes == 2 else self.num_classes
 
+        self.model = nn.Sequential(
+            nn.Linear(self.input_dimension, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(32, output_dim)
+        )
 
+        if self.num_classes == 2:
+            self.loss_function = nn.BCEWithLogitsLoss()
+        else:
+            self.loss_function = nn.CrossEntropyLoss()
 
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.model.to(self.device)
+
+    def forward(self, x):
+        return self.model(x)
+
+    def train_epoch(self, X_train, y_train):
+        X = torch.tensor(X_train, dtype=torch.float32).to(self.device)
+        if self.num_classes == 2:
+            y = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(self.device)
+        else:
+            y = torch.tensor(y_train, dtype=torch.long).to(self.device)
+
+        for epoch in range(self.epochs):
+            self.model.train()
+            self.optimizer.zero_grad()
+            out = self.forward(X)
+            loss = self.loss_function(out, y)
+            loss.backward()
+            self.optimizer.step()
+
+    def evaluate(self, X_val, y_val):
+        X = torch.tensor(X_val, dtype=torch.float32).to(self.device)
+        with torch.no_grad():
+            self.model.eval()
+            out = self.forward(X).cpu()
+
+        if self.num_classes == 2:
+            out = torch.sigmoid(out)
+            preds = (out.numpy() > self.threshold).astype(int)
+        else:
+            preds = torch.argmax(torch.softmax(out, dim=1), dim=1).numpy()
+
+        return f1_score(y_val, preds, average='macro')
+
+    def fit_save(self, X_train, y_train, param_grid=None):
+        if param_grid is None:
+            if self.num_classes == 2:
+                param_grid = {
+                    'learning_rate': [0.01, 0.001],
+                    'epochs': [300,350,400,500,700,800,900,1000,1500,2000,3000,4000],
+                    'threshold': [0.4, 0.5, 0.6],
+                }
+            else:
+                param_grid = {
+                    'learning_rate': [0.01, 0.001],
+                    'epochs': [300,350,400,500,700,800,900,1000,1500,2000,3000,4000],
+                }
+
+        best_score = -np.inf
+        best_params = None
+
+        for params in ParameterGrid(param_grid):
+            f1_scores = []
+
+            kf = KFold(n_splits=self.cv, shuffle=True, random_state=42)
+            for train_idx, val_idx in kf.split(X_train):
+                X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
+                y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
+
+                self.learning_rate = params['learning_rate']
+                self.epochs = params['epochs']
+                if self.num_classes == 2:
+                    self.threshold = params['threshold']
+                self._init_model_()
+
+                self.train_epoch(X_tr.to_numpy(), y_tr.to_numpy())
+                f1 = self.evaluate(X_val.to_numpy(), y_val.to_numpy())
+                f1_scores.append(f1)
+
+            avg_f1 = np.mean(f1_scores)
+            if avg_f1 > best_score:
+                best_score = avg_f1
+                best_params = params
+
+        print(f"Best parameters: {best_params}")
+        print(f"Best macro F1-score (CV): {best_score:.4f}")
+
+        self.learning_rate = best_params['learning_rate']
+        self.epochs = best_params['epochs']
+        if self.num_classes == 2:
+            self.threshold = best_params['threshold']
+        self._init_model_()
+
+        start_time = time.time()
+        self.train_epoch(X_train.to_numpy(), y_train.to_numpy())
+        end_time = time.time()
+        self.time_taken = end_time - start_time
+
+        torch.save({
+            "model": self.model.state_dict(),
+            "input_dim": self.input_dimension,
+            "num_classes": self.num_classes,
+            "time": self.time_taken
+        }, self.save_path)
+
+        print(f"Training time for best model: {self.time_taken:.4f} seconds")
+        print(f"Saved best model to {self.save_path}")
+
+    def predict_proba(self, X_test):
+        self.model.eval()
+        X_test = torch.tensor(X_test.to_numpy(), dtype=torch.float32).to(self.device)
+        with torch.no_grad():
+            logits = self.forward(X_test).cpu()
+
+        if self.num_classes == 2:
+            probs = torch.sigmoid(logits).numpy()
+        else:
+            probs = torch.softmax(logits, dim=1).numpy()
+
+        return probs
+
+    def predict(self, X_test):
+        probs = self.predict_proba(X_test)
+        if self.num_classes == 2:
+            return (probs > self.threshold).astype(int)
+        else:
+            return np.argmax(probs, axis=1)
+
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
+        y_pred = self.predict(X_test)
+        accuracy = accuracy_score(y_test, y_pred)
+        proba = self.predict_proba(X_test)
+
+        if self.num_classes == 2:
+            y_proba = np.hstack([proba, 1 - proba])
+        else:
+            y_proba = proba
+
+        metrics = Metric(
+            accuracy=accuracy,
+            y_test=y_test,
+            y_pred=y_pred,
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
+        )
+        return metrics
+
+    def evaluation_mode(self, model_path):
+        model_data = torch.load(model_path)
+        self.input_dimension = model_data["input_dim"]
+        self.num_classes = model_data.get("num_classes", 2)
+        self.time_taken = model_data["time"]
+        self._init_model_()
+        self.model.load_state_dict(model_data["model"])
+        self.model.to(self.device)
 # class MLP(nn.Module):
 #     def __init__(self, number_of_features=None, learning_rate=0.001, epochs=100, save_name="", cv=5):
 #         super(MLP, self).__init__()
@@ -59,6 +238,8 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #         self.save_path = save_name + ".pth"
 #         self.learning_rate = learning_rate
 #         self.cv = cv
+#         self.loss_function_type = 'bcewithlogits'  # default
+#         self.threshold = 0.5
 #         self.time_taken = None
 
 #         if number_of_features is not None:
@@ -77,18 +258,15 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #             nn.Dropout(0.3),
 #             nn.Linear(32, 1)
 #         )
-#         #     nn.Linear(self.input_dimension, 128),
-#         #     nn.ReLU(),
-#         #     nn.Linear(128, 64),
-#         #     nn.ReLU(),
-#         #     nn.Linear(64, 32),
-#         #     nn.ReLU(),
-#         #     nn.Linear(32, 1)
-#         #     # No Sigmoid here because BCEWithLogitsLoss expects logits
-#         # )
 
-#         # Default loss function; might be replaced in train_epoch if class_weight is set
-#         self.loss_function = nn.BCEWithLogitsLoss()
+#         if self.loss_function_type == 'bce':
+#             self.model.add_module('Sigmoid', nn.Sigmoid())
+#             self.loss_function = nn.BCELoss()
+#         elif self.loss_function_type == 'bcewithlogits':
+#             self.loss_function = nn.BCEWithLogitsLoss()
+#         else:
+#             raise ValueError("Invalid loss_function_type. Use 'bce' or 'bcewithlogits'.")
+
 #         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
 #         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #         self.model.to(self.device)
@@ -96,19 +274,9 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #     def forward(self, x):
 #         return self.model(x)
 
-#     def train_epoch(self, X_train, y_train, class_weight=None):
+#     def train_epoch(self, X_train, y_train):
 #         X = torch.tensor(X_train, dtype=torch.float32).to(self.device)
 #         y = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(self.device)
-
-#         # If class_weight is 'balanced', compute pos_weight and update loss function
-#         if class_weight == 'balanced':
-#             y_np = y_train
-#             weights = compute_class_weight(class_weight='balanced', classes=np.unique(y_np), y=y_np)
-#             # pos_weight in BCEWithLogitsLoss expects the weight for the positive class
-#             pos_weight = torch.tensor(weights[1] / weights[0], dtype=torch.float32).to(self.device)
-#             self.loss_function = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-#         else:
-#             self.loss_function = nn.BCEWithLogitsLoss()
 
 #         for epoch in range(self.epochs):
 #             self.model.train()
@@ -122,22 +290,26 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #         X = torch.tensor(X_val, dtype=torch.float32).to(self.device)
 #         with torch.no_grad():
 #             self.model.eval()
-#             preds_logits = self.forward(X).cpu().numpy()
-#         preds = (preds_logits > 0).astype(int)  # Threshold logits at 0 (sigmoid 0.5)
+#             out = self.forward(X).cpu().numpy()
+
+#         if self.loss_function_type == 'bcewithlogits':
+#             out = torch.sigmoid(torch.tensor(out)).numpy()
+
+#         preds = (out > self.threshold).astype(int)
 #         return f1_score(y_val, preds, average='macro')
 
 #     def fit_save(self, X_train, y_train, param_grid=None):
 #         if param_grid is None:
 #             param_grid = {
-#                 'learning_rate': [0.01,0.005, 0.001,0.0005],
-#                 'epochs': [50, 100,150,200,250,300],
-#                 'class_weight': [None, 'balanced']
+#                 'learning_rate': [0.01, 0.001,0.0005],
+#                 'epochs': [300,350,400,500,700,800,900,1000,1500,2000,3000,4000],
+#                 'loss_function_type': ['bce','bcewithlogits'],
+#                 'threshold': [0.4, 0.5, 0.6]
 #             }
 
 #         best_score = -np.inf
 #         best_params = None
 
-#         # Grid Search (timing excluded)
 #         for params in ParameterGrid(param_grid):
 #             f1_scores = []
 
@@ -148,10 +320,11 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 
 #                 self.learning_rate = params['learning_rate']
 #                 self.epochs = params['epochs']
-#                 class_weight = params.get('class_weight', None)
+#                 self.loss_function_type = params['loss_function_type']
+#                 self.threshold = params['threshold']
 #                 self._init_model_()
 
-#                 self.train_epoch(X_tr.to_numpy(), y_tr.to_numpy(), class_weight=class_weight)
+#                 self.train_epoch(X_tr.to_numpy(), y_tr.to_numpy())
 #                 f1 = self.evaluate(X_val.to_numpy(), y_val.to_numpy())
 #                 f1_scores.append(f1)
 
@@ -164,18 +337,18 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #         print(f"Best parameters: {best_params}")
 #         print(f"Best macro F1-score (CV): {best_score:.4f}")
 
-#         # Final training (timed)
+#         # Final training
 #         self.learning_rate = best_params['learning_rate']
 #         self.epochs = best_params['epochs']
-#         class_weight = best_params.get('class_weight', None)
+#         self.loss_function_type = best_params['loss_function_type']
+#         self.threshold = best_params['threshold']
 #         self._init_model_()
 
 #         start_time = time.time()
-#         self.train_epoch(X_train.to_numpy(), y_train.to_numpy(), class_weight=class_weight)
+#         self.train_epoch(X_train.to_numpy(), y_train.to_numpy())
 #         end_time = time.time()
 #         self.time_taken = end_time - start_time
 
-#         # Save model
 #         torch.save({
 #             "model": self.model.state_dict(),
 #             "input_dim": self.input_dimension,
@@ -189,27 +362,34 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #         self.model.eval()
 #         X_test = torch.tensor(X_test.to_numpy(), dtype=torch.float32).to(self.device)
 #         with torch.no_grad():
-#             logits = self.forward(X_test).cpu().numpy()
-#         # probs = 1 / (1 + np.exp(-logits))  # sigmoid activation
-#         probs= torch.sigmoid(torch.tensor(logits)).numpy()
+#             probs = self.forward(X_test).cpu().numpy()
+
+#         if self.loss_function_type == 'bcewithlogits':
+#             probs = torch.sigmoid(torch.tensor(probs)).numpy()
+
+
 #         return probs
 
 #     def predict(self, X_test):
 #         probs = self.predict_proba(X_test)
-#         return (probs > 0.5).astype(int)
-
-#     def evaluate_and_get_metrics(self, X_test, y_test):
+#         return (probs > self.threshold).astype(int)
+#     def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
 #         y_pred = self.predict(X_test)
-#         acc = accuracy_score(y_test, y_pred)
+#         accuracy = accuracy_score(y_test, y_pred)
+#         proba1 = self.predict_proba(X_test)
+#         proba2=1-proba1
+#         y_proba=np.hstack([proba1, proba2])
 
-#         self.metrics = Metric(
-#             accuracy=acc,
+#         metrics = Metric(
+#             accuracy=accuracy,
 #             y_test=y_test,
 #             y_pred=y_pred,
-#             time_taken=self.time_taken
+#             y_proba=y_proba,
+#             time_taken=self.time_taken,
+#             save_dir=plt_name,
 #         )
 
-#         return self.metrics
+#         return metrics
 
 #     def evaluation_mode(self, model_path):
 #         model_data = torch.load(model_path)
@@ -218,181 +398,6 @@ print("<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>\n\n\
 #         self._init_model_()
 #         self.model.load_state_dict(model_data["model"])
 #         self.model.to(self.device)
-
-class MLP(nn.Module):
-    def __init__(self, number_of_features=None, learning_rate=0.001, epochs=100, save_name="", cv=5):
-        super(MLP, self).__init__()
-
-        self.input_dimension = number_of_features
-        self.epochs = epochs
-        self.save_path = save_name + ".pth"
-        self.learning_rate = learning_rate
-        self.cv = cv
-        self.loss_function_type = 'bcewithlogits'  # default
-        self.threshold = 0.5
-        self.time_taken = None
-
-        if number_of_features is not None:
-            self._init_model_()
-
-    def _init_model_(self):
-        # self.model = nn.Sequential(
-        #     nn.Linear(self.input_dimension, 128),
-        #     nn.ReLU(),
-        #     nn.Linear(128, 64),
-        #     nn.ReLU(),
-        #     nn.Linear(64, 32),
-        #     nn.ReLU(),
-        #     nn.Linear(32, 1)
-        # )
-        self.model = nn.Sequential(
-            nn.Linear(self.input_dimension, 128),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, 32),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(32, 1)
-        )
-
-        if self.loss_function_type == 'bce':
-            self.model.add_module('Sigmoid', nn.Sigmoid())
-            self.loss_function = nn.BCELoss()
-        elif self.loss_function_type == 'bcewithlogits':
-            self.loss_function = nn.BCEWithLogitsLoss()
-        else:
-            raise ValueError("Invalid loss_function_type. Use 'bce' or 'bcewithlogits'.")
-
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model.to(self.device)
-
-    def forward(self, x):
-        return self.model(x)
-
-    def train_epoch(self, X_train, y_train):
-        X = torch.tensor(X_train, dtype=torch.float32).to(self.device)
-        y = torch.tensor(y_train, dtype=torch.float32).view(-1, 1).to(self.device)
-
-        for epoch in range(self.epochs):
-            self.model.train()
-            self.optimizer.zero_grad()
-            out = self.forward(X)
-            loss = self.loss_function(out, y)
-            loss.backward()
-            self.optimizer.step()
-
-    def evaluate(self, X_val, y_val):
-        X = torch.tensor(X_val, dtype=torch.float32).to(self.device)
-        with torch.no_grad():
-            self.model.eval()
-            out = self.forward(X).cpu().numpy()
-
-        if self.loss_function_type == 'bcewithlogits':
-            out = torch.sigmoid(torch.tensor(out)).numpy()
-
-        preds = (out > self.threshold).astype(int)
-        return f1_score(y_val, preds, average='macro')
-
-    def fit_save(self, X_train, y_train, param_grid=None):
-        if param_grid is None:
-            param_grid = {
-                'learning_rate': [0.01, 0.001,0.0005],
-                'epochs': [300,350,400,500,700,800,900,1000,1500,2000,3000,4000],
-                'loss_function_type': ['bce','bcewithlogits'],
-                'threshold': [0.4, 0.5, 0.6]
-            }
-
-        best_score = -np.inf
-        best_params = None
-
-        for params in ParameterGrid(param_grid):
-            f1_scores = []
-
-            kf = KFold(n_splits=self.cv, shuffle=True, random_state=42)
-            for train_idx, val_idx in kf.split(X_train):
-                X_tr, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
-                y_tr, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
-
-                self.learning_rate = params['learning_rate']
-                self.epochs = params['epochs']
-                self.loss_function_type = params['loss_function_type']
-                self.threshold = params['threshold']
-                self._init_model_()
-
-                self.train_epoch(X_tr.to_numpy(), y_tr.to_numpy())
-                f1 = self.evaluate(X_val.to_numpy(), y_val.to_numpy())
-                f1_scores.append(f1)
-
-            avg_f1 = np.mean(f1_scores)
-
-            if avg_f1 > best_score:
-                best_score = avg_f1
-                best_params = params
-
-        print(f"Best parameters: {best_params}")
-        print(f"Best macro F1-score (CV): {best_score:.4f}")
-
-        # Final training
-        self.learning_rate = best_params['learning_rate']
-        self.epochs = best_params['epochs']
-        self.loss_function_type = best_params['loss_function_type']
-        self.threshold = best_params['threshold']
-        self._init_model_()
-
-        start_time = time.time()
-        self.train_epoch(X_train.to_numpy(), y_train.to_numpy())
-        end_time = time.time()
-        self.time_taken = end_time - start_time
-
-        torch.save({
-            "model": self.model.state_dict(),
-            "input_dim": self.input_dimension,
-            "time": self.time_taken
-        }, self.save_path)
-
-        print(f"Training time for best model: {self.time_taken:.4f} seconds")
-        print(f"Saved best model to {self.save_path}")
-
-    def predict_proba(self, X_test):
-        self.model.eval()
-        X_test = torch.tensor(X_test.to_numpy(), dtype=torch.float32).to(self.device)
-        with torch.no_grad():
-            probs = self.forward(X_test).cpu().numpy()
-
-        if self.loss_function_type == 'bcewithlogits':
-            probs = torch.sigmoid(torch.tensor(probs)).numpy()
-
-
-        return probs
-
-    def predict(self, X_test):
-        probs = self.predict_proba(X_test)
-        return (probs > self.threshold).astype(int)
-
-    def evaluate_and_get_metrics(self, X_test, y_test):
-        y_pred = self.predict(X_test)
-        acc = accuracy_score(y_test, y_pred)
-
-        self.metrics = Metric(
-            accuracy=acc,
-            y_test=y_test,
-            y_pred=y_pred,
-            time_taken=self.time_taken
-        )
-
-        return self.metrics
-
-    def evaluation_mode(self, model_path):
-        model_data = torch.load(model_path)
-        self.input_dimension = model_data["input_dim"]
-        self.time_taken = model_data["time"]
-        self._init_model_()
-        self.model.load_state_dict(model_data["model"])
-        self.model.to(self.device)
 
 
 
@@ -725,15 +730,18 @@ class LR():
     def predict(self, X_test):
         return self.model.predict(X_test)
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-
+        y_proba = self.model.predict_proba(X_test)
+       
         metrics = Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
-            time_taken=self.time_taken
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
         )
 
         return metrics
@@ -839,17 +847,22 @@ class Random_Forest():
 
     def predict(self, X_test):
         return self.model.predict(X_test)
+    
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-
+        y_proba = self.model.predict_proba(X_test)
+       
         metrics = Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
-            time_taken=self.time_taken
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
         )
+
         return metrics
 
     def evaluation_mode(self, model_path):
@@ -913,16 +926,20 @@ class Decision_Tree():
 
     def predict(self, X_test):
         return self.model.predict(X_test)
+    
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-
+        y_proba = self.model.predict_proba(X_test)
+       
         metrics = Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
-            time_taken=self.time_taken
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
         )
 
         return metrics
@@ -931,77 +948,8 @@ class Decision_Tree():
         model_data = jlb.load(model_path)
         self.model = model_data["model"]
         self.time_taken = model_data["time"]
-# class Decision_Tree():
-#     def __init__(self, random_state=42, save_name="", cv=5):
-#         self.random_state = random_state
-#         self.save_path = save_name + ".pkl"
-#         self.cv = cv  # Number of folds for cross-validation
-#         self.time_taken = None
 
-#     def fit_save(self, X_train, y_train):
-#         start_time = time.time()
 
-#         # Define hyperparameter search space
-#         param_grid = {
-#             'max_depth': [3, 5, 10, 15, 20, 25, None],
-#             'min_samples_split': [2, 5, 10, 20],
-#             'min_samples_leaf': [1, 2, 4, 6],
-#             'criterion': ['gini', 'entropy', 'log_loss'], 
-#             'class_weight': [None, 'balanced'],
-#             'splitter': ['best', 'random']
-#         }
-
-#         # Use F1 Macro as scoring
-#         scorer = make_scorer(f1_score, average='macro')
-
-#         # Perform Grid Search CV
-#         grid_search = GridSearchCV(
-#             estimator=DecisionTreeClassifier(random_state=self.random_state),
-#             param_grid=param_grid,
-#             scoring=scorer,
-#             cv=self.cv,
-#             n_jobs=-1,
-#             verbose=1
-#         )
-
-#         # Fit the model
-#         grid_search.fit(X_train, y_train)
-#         self.model = grid_search.best_estimator_
-
-#         end_time = time.time()
-#         self.time_taken = end_time - start_time
-
-#         print(f"Best parameters: {grid_search.best_params_}")
-#         print(f"Best macro F1-score: {grid_search.best_score_}")
-
-#         model_data = {
-#             "model": self.model,
-#             "time": self.time_taken
-#         }
-
-#         jlb.dump(model_data, self.save_path)
-#         print(f"Saved best model to {self.save_path}")
-
-#     def predict(self, X_test):
-#         return self.model.predict(X_test)
-
-#     def evaluate_and_get_metrics(self, X_test, y_test):
-#         y_pred = self.predict(X_test)
-#         accuracy = accuracy_score(y_test, y_pred)
-
-#         metrics = Metric(
-#             accuracy=accuracy,
-#             y_test=y_test,
-#             y_pred=y_pred,
-#             time_taken=self.time_taken
-#         )
-
-#         return metrics
-
-#     def evaluation_mode(self, model_path):
-#         model_data = jlb.load(model_path)
-#         self.model = model_data["model"]
-#         self.time_taken = model_data["time"]
 
 
 
@@ -1023,7 +971,7 @@ class Support_Vector_Machine():
 
         # Grid search (not timed)
         grid_search = GridSearchCV(
-            estimator=SVC(random_state=42),
+            estimator=SVC(random_state=42, probability=True),
             param_grid=param_grid,
             scoring=scorer,
             cv=self.cv,
@@ -1039,7 +987,7 @@ class Support_Vector_Machine():
 
         # Time training of the best model only
         start_time = time.time()
-        self.model = SVC(random_state=42, **best_params)
+        self.model = SVC(random_state=42,  probability=True,**best_params)
         self.model.fit(X_train, y_train)
         end_time = time.time()
 
@@ -1056,16 +1004,20 @@ class Support_Vector_Machine():
 
     def predict(self, X_test):
         return self.model.predict(X_test)
+    
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-
+        y_proba = self.model.predict_proba(X_test)
+       
         metrics = Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
-            time_taken=self.time_taken
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
         )
 
         return metrics
@@ -1074,70 +1026,9 @@ class Support_Vector_Machine():
         model_data = jlb.load(model_path)
         self.model = model_data["model"]
         self.time_taken = model_data["time"]
-# class Support_Vector_Machine():
-#     def __init__(self, save_name="", cv=5):
-#         self.save_path = save_name + ".pkl"
-#         self.cv = cv
-#         self.time_taken = None
 
-#     def fit_save(self, X_train, y_train):
-#         start_time = time.time()
 
-#         # Define parameter grid for SVM
-#         param_grid = {
-#             'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],
-#             'C': [0.1, 1, 10],
-#             'gamma': ['scale', 'auto']
-#         }
 
-#         scorer = make_scorer(f1_score, average='macro')
-
-#         grid_search = GridSearchCV(
-#             estimator=SVC(random_state=42),
-#             param_grid=param_grid,
-#             scoring=scorer,
-#             cv=self.cv,
-#             n_jobs=-1,
-#             verbose=1
-#         )
-
-#         grid_search.fit(X_train, y_train)
-#         self.model = grid_search.best_estimator_
-
-#         end_time = time.time()
-#         self.time_taken = end_time - start_time
-
-#         print(f"Best parameters: {grid_search.best_params_}")
-#         print(f"Best macro F1-score: {grid_search.best_score_:.4f}")
-
-#         model_data = {
-#             "model": self.model,
-#             "time": self.time_taken
-#         }
-
-#         jlb.dump(model_data, self.save_path)
-#         print(f"Saved best model to {self.save_path}")
-
-#     def predict(self, X_test):
-#         return self.model.predict(X_test)
-
-#     def evaluate_and_get_metrics(self, X_test, y_test):
-#         y_pred = self.predict(X_test)
-#         accuracy = accuracy_score(y_test, y_pred)
-
-#         metrics = Metric(
-#             accuracy=accuracy,
-#             y_test=y_test,
-#             y_pred=y_pred,
-#             time_taken=self.time_taken
-#         )
-
-#         return metrics
-
-#     def evaluation_mode(self, model_path):
-#         model_data = jlb.load(model_path)
-#         self.model = model_data["model"]
-#         self.time_taken = model_data["time"]
 
 class XGBoost():
     def __init__(self, random_state=42, save_name="", cv=5):
@@ -1205,16 +1096,18 @@ class XGBoost():
 
     def predict(self, X_test):
         return self.model.predict(X_test)
-
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-
+        y_proba = self.model.predict_proba(X_test)
+       
         metrics = Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
-            time_taken=self.time_taken
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
         )
 
         return metrics
@@ -1222,76 +1115,9 @@ class XGBoost():
     def evaluation_mode(self, model_path):
         model_data = jlb.load(model_path)
         self.model = model_data["model"]
-        self.time_taken = model_data["time"]   
-# class XGBoost():
-#     def __init__(self, random_state=42, save_name="", cv=5):
-#         self.random_state = random_state
-#         self.save_path = save_name + ".pkl"
-#         self.cv = cv
-#         self.time_taken = None
+        self.time_taken = model_data["time"]
 
-#     def fit_save(self, X_train, y_train):
-#         start_time = time.time()
 
-#         param_grid = {
-#             'n_estimators': [50,75, 100, 150],
-#             'max_depth': [3, 5, 7],
-#             'learning_rate': [0.01, 0.1, 0.2],
-#             'subsample': [0.7, 0.8, 1.0],
-#             'colsample_bytree': [0.7, 0.8, 1.0],
-#             'gamma': [0, 0.1, 0.2, 0.25, 0.3],
-#             'reg_lambda': [1, 1.5, 2],
-#             'reg_alpha': [0, 0.5, 1, 1.5 , 2]
-#         }
-
-#         scorer = make_scorer(f1_score, average='macro')
-
-#         grid_search = GridSearchCV(
-#             estimator=XGBClassifier(random_state=self.random_state, use_label_encoder=False, eval_metric='mlogloss'),
-#             param_grid=param_grid,
-#             scoring=scorer,
-#             cv=self.cv,
-#             n_jobs=-1,
-#             verbose=1
-#         )
-
-#         grid_search.fit(X_train, y_train)
-#         self.model = grid_search.best_estimator_
-
-#         end_time = time.time()
-#         self.time_taken = end_time - start_time
-
-#         print(f"Best parameters: {grid_search.best_params_}")
-#         print(f"Best macro F1-score: {grid_search.best_score_}")
-
-#         model_data = {
-#             "model": self.model,
-#             "time": self.time_taken
-#         }
-
-#         jlb.dump(model_data, self.save_path)
-#         print(f"Saved best model to {self.save_path}")
-
-#     def predict(self, X_test):
-#         return self.model.predict(X_test)
-
-#     def evaluate_and_get_metrics(self, X_test, y_test):
-#         y_pred = self.predict(X_test)
-#         accuracy = accuracy_score(y_test, y_pred)
-
-#         metrics = Metric(
-#             accuracy=accuracy,
-#             y_test=y_test,
-#             y_pred=y_pred,
-#             time_taken=self.time_taken
-#         )
-
-#         return metrics
-
-#     def evaluation_mode(self, model_path):
-#         model_data = jlb.load(model_path)
-#         self.model = model_data["model"]
-#         self.time_taken = model_data["time"]
 
 class K_Nearest_Neighbor():
     def __init__(self, save_name="", cv=5):
@@ -1346,15 +1172,18 @@ class K_Nearest_Neighbor():
     def predict(self, X_test):
         return self.model.predict(X_test)
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-
+        y_proba = self.model.predict_proba(X_test)
+       
         metrics = Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
-            time_taken=self.time_taken
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
         )
 
         return metrics
@@ -1363,78 +1192,11 @@ class K_Nearest_Neighbor():
         model_data = jlb.load(model_path)
         self.model = model_data["model"]
         self.time_taken = model_data["time"]
-# class K_Nearest_Neighbor():
-#     def __init__(self, save_name="", cv=5):
-#         self.save_path = save_name + ".pkl"
-#         self.cv = cv  
-#         self.time_taken = None
-
-#     def fit_save(self, X_train, y_train):
-#         start_time = time.time()
-
-#         # Define hyperparameter grid
-#         param_grid = {
-#             'n_neighbors': [3, 5, 7,8, 9,10,11,12,13,14],
-#             'weights': ['uniform', 'distance'],
-#             'metric': ['euclidean', 'manhattan', 'minkowski']
-#         }
-
-#         # Use F1 Macro as scoring metric
-#         scorer = make_scorer(f1_score, average='macro')
-
-#         grid_search = GridSearchCV(
-#             estimator=KNeighborsClassifier(),
-#             param_grid=param_grid,
-#             scoring=scorer,
-#             cv=self.cv,
-#             n_jobs=-1,
-#             verbose=1
-#         )
-
-#         # Perform the grid search
-#         grid_search.fit(X_train, y_train)
-#         self.model = grid_search.best_estimator_
-
-#         end_time = time.time()
-#         self.time_taken = end_time - start_time
-
-#         print(f"Best parameters: {grid_search.best_params_}")
-#         print(f"Best macro F1-score: {grid_search.best_score_}")
-
-#         model_data = {
-#             "model": self.model,
-#             "time": self.time_taken
-#         }
-
-#         jlb.dump(model_data, self.save_path)
-#         print(f"Saved best model to {self.save_path}")
-
-#     def predict(self, X_test):
-#         return self.model.predict(X_test)
-
-#     def evaluate_and_get_metrics(self, X_test, y_test):
-#         y_pred = self.predict(X_test)
-#         accuracy = accuracy_score(y_test, y_pred)
-
-#         metrics = Metric(
-#             accuracy=accuracy,
-#             y_test=y_test,
-#             y_pred=y_pred,
-#             time_taken=self.time_taken
-#         )
-
-#         return metrics
-
-#     def evaluation_mode(self, model_path):
-#         model_data = jlb.load(model_path)
-#         self.model = model_data["model"]
-#         self.time_taken = model_data["time"]   
 
 
 class NavieBayes():
     def __init__(self, save_name = ""):
         self.save_path = save_name + ".pkl"
-
         self.model = GaussianNB()
     
     def fit_save(self, X_train, y_train):
@@ -1457,13 +1219,26 @@ class NavieBayes():
 
         return y_pred
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
-        y_pred = self.predict(X_test=X_test)
+    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
+        y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
+        y_proba = self.model.predict_proba(X_test)
+        # print(y_test.ndim)
+        # print("Unique classes in y_test:", np.unique(y_test))
+        # print("y_proba shape:", y_proba.shape)
+        # print("Sample y_proba rows:", y_proba[:5])
 
-        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken)
+        metrics = Metric(
+            accuracy=accuracy,
+            y_test=y_test,
+            y_pred=y_pred,
+            y_proba=y_proba,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
+        )
 
         return metrics
+
 
     def evaluation_mode(self, model_path):
         model_data = jlb.load(model_path)

@@ -7,15 +7,23 @@ import missingno as msno
 import importlib
 import os
 import time
-from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler, QuantileTransformer
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, StandardScaler, QuantileTransformer,label_binarize
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
-
 from sklearn.metrics import (
-    accuracy_score, f1_score, precision_score,
-    recall_score, confusion_matrix, log_loss
+    f1_score,
+    precision_score,
+    recall_score,
+    confusion_matrix,
+    roc_auc_score,
+    average_precision_score,
+    precision_recall_curve,
+    roc_curve,
+    accuracy_score,
+    log_loss
 )
+
 
 import torch
 import torch.nn as nn
@@ -389,35 +397,109 @@ class Plotter():
 
 
 class Metric():
-    def __init__(self, accuracy, y_test, y_pred , time_taken):
+    def __init__(self, accuracy, y_test, y_pred, time_taken, y_proba=None,save_dir=None):
         self.accuracy = accuracy
         self.time_taken = time_taken
-        self.f1 = f1_score(y_test, y_pred)
-        self.precision = precision_score(y_test, y_pred)
-        self.recall = recall_score(y_test, y_pred)
+        self.f1 = f1_score(y_test, y_pred, average='weighted')
+        self.precision = precision_score(y_test, y_pred, average='weighted')
+        self.recall = recall_score(y_test, y_pred, average='weighted')
         self.cf_matrix = confusion_matrix(y_test, y_pred)
         self.macro_f1 = f1_score(y_test, y_pred, average='macro')
-
+        self.save_dir=save_dir
         self.y_test = y_test
         self.y_pred = y_pred
+        self.y_proba = y_proba
+
+        # Try to compute ROC AUC and PR AUC
+        try:
+            classes = np.unique(y_test)
+            if len(classes) == 2 and y_proba.shape[1] == 2:
+                # Binary classification case, use probs for positive class only
+                self.roc_auc = roc_auc_score(y_test, y_proba[:, 1])
+                self.pr_auc = average_precision_score(y_test, y_proba[:, 1])
+            else:
+                # Multi-class case
+                self.y_test_bin = label_binarize(y_test, classes=classes)
+                if self.y_test_bin.shape[1] == 1:
+                    self.roc_auc = self.pr_auc = None
+                else:
+                    self.roc_auc = roc_auc_score(self.y_test_bin, y_proba, average="macro", multi_class="ovr")
+                    self.pr_auc = average_precision_score(self.y_test_bin, y_proba, average="macro")
+        except Exception as e:
+            print(f"Warning: Could not compute ROC/PR AUC: {e}")
+            self.roc_auc = None
+            self.pr_auc = None
 
     def print_metrics(self):
         print("\nOverall Metrics: \n")
-        print(f"--Test Accuracy: {self.accuracy * 100}")
-        
+        print(f"--Test Accuracy: {self.accuracy * 100:.2f}%")
         print(f"--Macro F1-Score: {self.macro_f1:.4f}")
+
+        print("\nClass-wise Metrics (weighted):")
+        print(f"--Precision: {self.precision:.4f}")
+        print(f"--Recall: {self.recall:.4f}")
+        print(f"--F1-Score: {self.f1:.4f}")
+
         print()
+        print(f"--ROC AUC: {self.roc_auc if self.roc_auc is not None else 'N/A'}")
+        print(f"--PR AUC: {self.pr_auc if self.pr_auc is not None else 'N/A'}")
 
-        print("Class-wise Metrics:")
-        print(f"--Precision: {self.precision}")
+        print(f"\n\nTime Taken By the Model: {self.time_taken:.4f} seconds\n\n")
 
-        print(f"--Recall: {self.recall:.6f}")
-        print(f"--F1-Score: {self.f1}")
+    def plot_auc_curves(self):
+        if self.roc_auc is None or self.pr_auc is None:
+            print("ROC/PR AUC not available for plotting.")
+            return
 
-        print(f"\n\nTime Taken By the model: {self.time_taken} seconds \n\n")
+        classes = np.unique(self.y_test)
+        n_classes = len(classes)
 
-    def get_confusion_matrix(self):
-        return self.cf_matrix
-    
-    def get_model_time(self):
-        return self.time_taken
+        if n_classes == 2:
+            # Binary case: plot single ROC and PR curve for positive class
+            fpr, tpr, _ = roc_curve(self.y_test, self.y_proba[:, 1])
+            plt.figure(figsize=(12,5))
+            plt.plot(fpr, tpr, label=f'ROC curve (AUC = {self.roc_auc:.2f})')
+            plt.title("ROC Curve")
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(f'plots/{self.save_dir}@roc_curve.png')
+            plt.show()
+
+            precision, recall, _ = precision_recall_curve(self.y_test, self.y_proba[:, 1])
+            plt.figure(figsize=(12,5))
+            plt.plot(recall, precision, label=f'PR curve (AP = {self.pr_auc:.2f})')
+            plt.title("Precision-Recall Curve")
+            plt.xlabel("Recall")
+            plt.ylabel("Precision")
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(f'plots/{self.save_dir}@PR_curve.png')
+            plt.show()
+
+        else:
+            # Multi-class case (your existing code)
+            plt.figure(figsize=(12, 5))
+            for i in range(n_classes):
+                fpr, tpr, _ = roc_curve(self.y_test_bin[:, i], self.y_proba[:, i])
+                plt.plot(fpr, tpr, label=f'Class {i} (AUC = {roc_auc_score(self.y_test_bin[:, i], self.y_proba[:, i]):.2f})')
+            plt.title("ROC Curves")
+            plt.xlabel("False Positive Rate")
+            plt.ylabel("True Positive Rate")
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(f'plots/{self.save_dir}@roc_curve.png')
+            plt.show()
+
+            plt.figure(figsize=(12, 5))
+            for i in range(n_classes):
+                precision, recall, _ = precision_recall_curve(self.y_test_bin[:, i], self.y_proba[:, i])
+                plt.plot(recall, precision, label=f'Class {i} (AP = {average_precision_score(self.y_test_bin[:, i], self.y_proba[:, i]):.2f})')
+            plt.title("Precision-Recall Curves")
+            plt.xlabel("Recall")
+            plt.ylabel("Precision")
+            plt.legend()
+            plt.grid(True)
+            plt.savefig(f'plots/{self.save_dir}@PR_curve.png')
+            plt.show()

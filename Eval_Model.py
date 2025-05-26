@@ -73,9 +73,9 @@ def extract_model_number(model_path):
         return reverse_models_mapping["LSTM"]
     l = model_path.split('@')[1][:-4]
     
-    return reverse_models_mapping[l]
+    return reverse_models_mapping[l],l
 
-def eval_model(model_num, model_path,X_test,y_test):
+def eval_model(model_num, model_path,X_test,y_test,plt_name):
     model = None
     if model_num == 1:
         model = LR()
@@ -106,10 +106,12 @@ def eval_model(model_num, model_path,X_test,y_test):
     model.evaluation_mode(model_path=model_path)
 
     # get the metrics
-    metrics = model.evaluate_and_get_metrics(X_test=X_test, y_test=y_test)
+    metrics = model.evaluate_and_get_metrics(X_test=X_test, y_test=y_test,plt_name=plt_name)
 
     # print the metrics
     metrics.print_metrics()
+    # print the plots
+    metrics.plot_auc_curves()
 
 def main():
     if len(sys.argv) < 3:
@@ -140,9 +142,9 @@ def main():
     X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
 
     # Evaluate the model
-    model_num = extract_model_number(model_path=model_path)
+    model_num,plt_name = extract_model_number(model_path=model_path)
     print(f"Evaluating on Model: {models_mapping[model_num]}")
-    eval_model(model_num=model_num, model_path=model_path, X_test=X_test_scaled, y_test=y_test)
+    eval_model(model_num=model_num, model_path=model_path, X_test=X_test_scaled, y_test=y_test,plt_name=plt_name)
 
 
 if __name__ == "__main__":

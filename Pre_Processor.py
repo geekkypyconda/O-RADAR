@@ -55,7 +55,7 @@ def main():
         data[col].fillna(data[col].mode()[0], inplace=True)
 
     # 6) Low-variance filter
-    vt = VarianceThreshold(threshold=0.01)
+    vt = VarianceThreshold(threshold=0.05)
     data = pd.DataFrame(vt.fit_transform(data), columns=data.columns[vt.get_support()],index=data.index)
 
     # 7) Correlation filter
