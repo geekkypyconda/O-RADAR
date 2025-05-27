@@ -26,7 +26,8 @@ import numpy as np
 import os
 import pandas as pd
 
-from Models import *
+from ML_Models import *
+from DL_Models import *
 from ORAN_Helper import Processor
 
 save_folder_path = "Saved_Models"
