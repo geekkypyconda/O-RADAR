@@ -66,15 +66,15 @@ reverse_models_mapping = {
 
 def extract_dataset_name(dataset_path):
     file_name = os.path.basename(dataset_path)
-
+    
     return file_name
 
 def extract_model_number(model_path):
     l = model_path.split('@')[1].split(".")[0]
     
-    return reverse_models_mapping[l]
+    return reverse_models_mapping[l],l
 
-def eval_model(model_num, model_path,X_test,y_test):
+def eval_model(model_num, model_path,X_test,y_test,plt_name):
     model = None
     if model_num == 1:
         model = LR()
@@ -107,10 +107,12 @@ def eval_model(model_num, model_path,X_test,y_test):
     model.evaluation_mode(model_path=model_path)
 
     # get the metrics
-    metrics = model.evaluate_and_get_metrics(X_test=X_test, y_test=y_test)
+    metrics = model.evaluate_and_get_metrics(X_test=X_test, y_test=y_test,plt_name=plt_name)
 
     # print the metrics
     metrics.print_metrics()
+    # print the plots
+    metrics.plot_auc_curves()
 
 def main():
     if len(sys.argv) < 3:
@@ -121,9 +123,16 @@ def main():
     model_path = sys.argv[2]
     dataset = pd.read_csv(dataset_path)
 
-    data, labels = processor.separate_label(data=dataset, label_name="label")
+        # Derive filename from dataset_path or override
+    base_filename = os.path.splitext(os.path.basename(dataset_path))[0]
+    if len(sys.argv) == 4:
+        base_filename = os.path.splitext(sys.argv[3])[0]
 
-    X_train, X_test, y_train, y_test = train_test_split(data,labels, test_size=0.2, random_state=42)
+    # Load dataset
+    dataset = pd.read_csv(dataset_path)
+    data, labels = processor.separate_label(data=dataset, label_name="label")
+    X_train, X_test, y_train, y_test = train_test_split(data, labels, test_size=0.2, random_state=42)
+
 
     print("\n\n-----------------------------------------------")
     print(f"Training Set dimensions: {X_train.shape}")
@@ -131,8 +140,18 @@ def main():
     print("-----------------------------------------------\n\n")
 
     model_num = extract_model_number(model_path=model_path)
+    # Load the trained scaler
+    scaler_path = os.path.join("Saved_Models", f"{base_filename}_scaler.pkl")
+    scaler = jlb.load(scaler_path)
+
+    # Transform test data
+    X_test_scaled = scaler.transform(X_test)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns, index=X_test.index)
+
+    # Evaluate the model
+    model_num,plt_name = extract_model_number(model_path=model_path)
     print(f"Evaluating on Model: {models_mapping[model_num]}")
-    eval_model(model_num=model_num, model_path=model_path,X_test=X_test, y_test=y_test)
+    eval_model(model_num=model_num, model_path=model_path, X_test=X_test_scaled, y_test=y_test,plt_name=plt_name)
 
 
 if __name__ == "__main__":
