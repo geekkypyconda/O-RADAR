@@ -111,6 +111,8 @@ class Processor():
 
         return l
 
+    
+        
 
     def get_correlatd_count(self, corr_pairs):
         cnt = {}
@@ -397,21 +399,12 @@ class Plotter():
 
 
 class Metric():
-<<<<<<< HEAD
-    def __init__(self, accuracy, y_test, y_pred, time_taken, num_labels):
-        self.accuracy = accuracy
-        self.time_taken = time_taken
-        self.f1 = f1_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
-        self.precision = precision_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
-        self.recall = recall_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
-=======
     def __init__(self, accuracy, y_test, y_pred, time_taken, y_proba=None,save_dir=None):
         self.accuracy = accuracy
         self.time_taken = time_taken
         self.f1 = f1_score(y_test, y_pred, average='weighted')
         self.precision = precision_score(y_test, y_pred, average='weighted')
         self.recall = recall_score(y_test, y_pred, average='weighted')
->>>>>>> ML_models
         self.cf_matrix = confusion_matrix(y_test, y_pred)
         self.macro_f1 = f1_score(y_test, y_pred, average='macro')
         self.save_dir=save_dir
@@ -422,13 +415,13 @@ class Metric():
         # Try to compute ROC AUC and PR AUC
         try:
             classes = np.unique(y_test)
+            self.y_test_bin = label_binarize(y_test, classes=classes)
             if len(classes) == 2 and y_proba.shape[1] == 2:
                 # Binary classification case, use probs for positive class only
                 self.roc_auc = roc_auc_score(y_test, y_proba[:, 1])
                 self.pr_auc = average_precision_score(y_test, y_proba[:, 1])
             else:
                 # Multi-class case
-                self.y_test_bin = label_binarize(y_test, classes=classes)
                 if self.y_test_bin.shape[1] == 1:
                     self.roc_auc = self.pr_auc = None
                 else:

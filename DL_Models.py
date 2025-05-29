@@ -35,8 +35,10 @@ import h5py
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential # type: ignore
-from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
-
+# from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
+# from tensorflow.keras.regularizers import l2 
+from tensorflow.keras.layers import LSTM, Dense, Dropout, BatchNormalization,Input
+from tensorflow.keras.regularizers import l2
 import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -321,92 +323,183 @@ class Simple_LSTM():
             self.number_of_features = file.attrs["num_features"]
 
 
-class Simple_LSTM():
-    def __init__(self, timesteps = None, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
+
+# class Simple_LSTM():
+#     def __init__(self, timesteps = None, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
+#         self.save_path = save_name + ".h5"
+#         self.learning_rate = learning_rate
+#         self.epochs = epochs
+#         self.number_of_features = number_of_features
+#         self.timesteps = timesteps
+
+#         self.batch_size = batch_size
+
+#         if save_name == "":
+#             pass
+#         else:
+#             self._init_model_()
+
+#     def _init_model_(self):
+#         self.model = Sequential([
+#             LSTM(50, activation='relu', return_sequences=True, input_shape=(self.timesteps, self.number_of_features)),
+#             Dropout(0.2),
+#             LSTM(32, activation='relu'),
+#             Dropout(0.2),
+#             Dense(1, activation='sigmoid') 
+#         ])
+
+#         self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+
+#     def transform_label(self, labels,sample_set_size):
+#         y_seq = (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
+
+#         return y_seq
+
+#     def fit_save(self,X_train, y_train):
+#         sample_set_size = X_train.shape[0] // self.timesteps
+
+#         X_train = X_train[:sample_set_size * self.timesteps]
+#         y_train = y_train[:sample_set_size * self.timesteps]
+
+#         y_train = self.transform_label(labels=y_train, sample_set_size=sample_set_size)
+
+#         X_train = X_train.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
+#         start_time = time.time()
+
+#         self.history = self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size)
+
+#         end_time = time.time()
+
+#         self.time_taken = end_time - start_time
+        
+#         self.model.save(self.save_path)
+        
+#         with h5py.File(self.save_path, "a") as file:
+#             file.attrs["time"] = self.time_taken
+#             file.attrs["timesteps"] = self.timesteps
+#             file.attrs["num_features"] = self.number_of_features
+
+#     def predict_proba(self, X_test):
+#         return self.model.predict(X_test)
+
+#     def predict(self, X_test):
+#         probs = self.model.predict_proba(X_test)
+#         return (probs > 0.5).astype(int)
+
+#     def evaluate_and_get_metrics(self, X_test, y_test):
+#         sample_set_size = X_test.shape[0] // self.timesteps
+#         X_test = X_test[:sample_set_size * self.timesteps]
+#         y_test = y_test[:sample_set_size * self.timesteps]
+
+#         y_test = self.transform_label(labels = y_test, sample_set_size=sample_set_size)
+
+#         X_test = X_test.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
+#         y_pred = self.model.predict(X_test)
+#         loss, acc = self.model.evaluate(X_test,y_test)
+
+#         # Defining Metrics for this model
+#         self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
+
+#         return self.metrics
+
+#     def evaluation_mode(self, model_path):
+#         self.model = tf.keras.models.load_model(model_path)
+
+#         with h5py.File(model_path, "r") as file:
+#             self.time_taken = file.attrs["time"]
+#             self.timesteps = file.attrs["timesteps"]
+#             self.number_of_features = file.attrs["num_features"]
+class Simple_LSTM:
+    def __init__(self, num_labels=-1, timesteps=1, number_of_features=None,
+                 learning_rate=0.01, epochs=100, batch_size=32, save_name=""):
+
         self.save_path = save_name + ".h5"
         self.learning_rate = learning_rate
         self.epochs = epochs
+        self.batch_size = batch_size
         self.number_of_features = number_of_features
         self.timesteps = timesteps
+        self.num_labels = num_labels
 
-        self.batch_size = batch_size
+        self.classification_type = "binary" if self.num_labels == 2 else "multi-class"
+        self.loss_function = 'binary_crossentropy' if self.classification_type == "binary" else 'sparse_categorical_crossentropy'
 
-        if save_name == "":
-            pass
-        else:
+        if save_name:
             self._init_model_()
 
     def _init_model_(self):
-        self.model = Sequential([
-            LSTM(50, activation='relu', return_sequences=True, input_shape=(self.timesteps, self.number_of_features)),
-            Dropout(0.2),
-            LSTM(32, activation='relu'),
-            Dropout(0.2),
-            Dense(1, activation='sigmoid') 
-        ])
+        self.model = Sequential()
+        self.model.add(Input(shape=(self.timesteps, self.number_of_features)))
+        self.model.add(LSTM(64, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01)))
+        self.model.add(BatchNormalization())
+        self.model.add(Dropout(0.4))
+        self.model.add(LSTM(32, activation='relu', kernel_regularizer=l2(0.01)))
+        self.model.add(BatchNormalization())
+        self.model.add(Dropout(0.3))
 
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+        if self.classification_type == "binary":
+            self.model.add(Dense(1, activation='sigmoid'))
+        else:
+            self.model.add(Dense(self.num_labels, activation='softmax'))
 
-    def transform_label(self, labels,sample_set_size):
-        y_seq = (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate),
+                           loss=self.loss_function,
+                           metrics=['accuracy'])
 
-        return y_seq
+    def transform_label(self, labels, sample_set_size):
+        """
+        For binary classification only: reshape and binarize.
+        """
+        return (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
 
-    def fit_save(self,X_train, y_train):
-        sample_set_size = X_train.shape[0] // self.timesteps
-
-        X_train = X_train[:sample_set_size * self.timesteps]
-        y_train = y_train[:sample_set_size * self.timesteps]
-
-        y_train = self.transform_label(labels=y_train, sample_set_size=sample_set_size)
-
-        X_train = X_train.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
+    def fit_save(self, X_train, y_train):
+        X_train = X_train.to_numpy().reshape((X_train.shape[0], self.timesteps, X_train.shape[1]))
         start_time = time.time()
-
         self.history = self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size)
-
-        end_time = time.time()
-
-        self.time_taken = end_time - start_time
-        
+        self.time_taken = time.time() - start_time
         self.model.save(self.save_path)
-        
-        with h5py.File(self.save_path, "a") as file:
-            file.attrs["time"] = self.time_taken
-            file.attrs["timesteps"] = self.timesteps
-            file.attrs["num_features"] = self.number_of_features
+        with h5py.File(self.save_path, "a") as f:
+            f.attrs.update({
+                "time": self.time_taken,
+                "timesteps": self.timesteps,
+                "num_features": self.number_of_features,
+                "num_classes": self.num_labels
+            })
 
     def predict_proba(self, X_test):
+        X_test = X_test.to_numpy().reshape((X_test.shape[0], self.timesteps, X_test.shape[1]))
         return self.model.predict(X_test)
 
     def predict(self, X_test):
-        probs = self.model.predict_proba(X_test)
-        return (probs > 0.5).astype(int)
+        probs = self.predict_proba(X_test)
+        if self.num_labels == 2:
+            return (probs > 0.5).astype(int).flatten(), np.hstack([1 - probs, probs])
+        else:
+            return np.argmax(probs, axis=1), probs
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
-        sample_set_size = X_test.shape[0] // self.timesteps
-        X_test = X_test[:sample_set_size * self.timesteps]
-        y_test = y_test[:sample_set_size * self.timesteps]
-
-        y_test = self.transform_label(labels = y_test, sample_set_size=sample_set_size)
-
-        X_test = X_test.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
-        y_pred = self.model.predict(X_test)
-        loss, acc = self.model.evaluate(X_test,y_test)
-
-        # Defining Metrics for this model
-        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
-
-        return self.metrics
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
+        X_test = X_test.to_numpy().reshape((X_test.shape[0], self.timesteps, X_test.shape[1]))
+        y_pred, y_probs = self.predict(X_test)
+        loss, acc = self.model.evaluate(X_test, y_test)
+        return Metric(
+            accuracy=acc,
+            y_test=y_test,
+            y_pred=y_pred,
+            time_taken=self.time_taken,
+            save_dir=plt_name,
+            y_proba=y_probs
+        )
 
     def evaluation_mode(self, model_path):
         self.model = tf.keras.models.load_model(model_path)
+        with h5py.File(model_path, "r") as f:
+            self.time_taken = f.attrs["time"]
+            self.timesteps = f.attrs["timesteps"]
+            self.number_of_features = f.attrs["num_features"]
+            self.num_labels = f.attrs["num_classes"]
+            self.classification_type = "binary" if self.num_labels == 2 else "multi-class"
 
-        with h5py.File(model_path, "r") as file:
-            self.time_taken = file.attrs["time"]
-            self.timesteps = file.attrs["timesteps"]
-            self.number_of_features = file.attrs["num_features"]
-
+            
 class Autoencoder(nn.Module):
     def __init__(self, input_dimension, encoded_dimension):
         super(Autoencoder,self).__init__()
@@ -682,3 +775,5 @@ class Isolation_Forest():
         model_data = jlb.load(model_path)
         self.model = model_data["model"]
         self.time_taken = model_data["time"]
+
+

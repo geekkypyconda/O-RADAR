@@ -1,11 +1,8 @@
-<<<<<<< HEAD
 '''
 Command: python3 Pre_Processor.py <yes/no> FBSDetector/dataset/<dataset_name>
 '''
 
 
-=======
->>>>>>> ML_models
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -63,11 +60,7 @@ def main():
         data[col].fillna(data[col].mode()[0], inplace=True)
 
     # 6) Low-variance filter
-<<<<<<< HEAD
     vt = VarianceThreshold(threshold=0.01)
-=======
-    vt = VarianceThreshold(threshold=0.05)
->>>>>>> ML_models
     data = pd.DataFrame(vt.fit_transform(data), columns=data.columns[vt.get_support()],index=data.index)
 
     # 7) Correlation filter
@@ -88,11 +81,6 @@ def main():
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
     fn = extract_dataset_name()
-<<<<<<< HEAD
-    fn = fn + "_" + drop_dup
-
-=======
->>>>>>> ML_models
     if len(sys.argv) == 4:
         fn = sys.argv[3]
 

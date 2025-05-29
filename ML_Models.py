@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 import numpy as np
+import pandas as pd
 import time
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
@@ -7,7 +8,9 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
+import os
 
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 from xgboost import XGBClassifier
 
 from sklearn.metrics import (
@@ -30,6 +33,10 @@ from ORAN_Helper import Metric
 import joblib as jlb
 from sklearn.model_selection import GridSearchCV
 from sklearn.utils.class_weight import compute_class_weight
+from collections import Counter
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline
 
 import h5py
 
@@ -37,9 +44,9 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential # type: ignore
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
 
-import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
+
+from ORAN_Helper import Processor
 print("\n\n\n<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>")
 print("TensorFlow version:", tf.__version__)
 print("GPU is", "available" if tf.config.list_physical_devices('GPU') else "NOT AVAILABLE")
@@ -59,22 +66,22 @@ class LR():
         param_grid = [
         {
             'penalty': ['l2'],
-            'C': [0.01, 0.1, 1.0, 10.0],
+            'C': [0.01, 0.1],
             'solver': ['lbfgs', 'saga'],
-            'max_iter': [500, 1000]
+            'max_iter': [1000]
         },
         {
             'penalty': ['l1'],
-            'C': [0.01, 0.1, 1.0, 10.0],
+            'C': [0.01, 0.1],
             'solver': ['saga', 'liblinear'],
-            'max_iter': [500, 1000]
+            'max_iter': [1000]
         },
         {
             'penalty': ['elasticnet'],
-            'C': [0.01, 0.1, 1.0, 10.0],
+            'C': [0.01, 0.1],
             'solver': ['saga'],
-            'max_iter': [500, 1000],
-            'l1_ratio': [0.5, 0.7]  # Needed only for elasticnet
+            'max_iter': [1000],
+            'l1_ratio': [0.5, 0.7] 
         }
     ]
 
@@ -228,7 +235,7 @@ class Decision_Tree():
         # Define hyperparameter search space
         param_grid = {
             'max_depth': [3, 5, 10, 15, 20, 25, None],
-            'min_samples_split': [2, 5, 10, 20],
+            'min_samples_split': [2, 5, 10, 20,21, 25],
             'min_samples_leaf': [1, 2, 4, 6],
             'criterion': ['gini', 'entropy', 'log_loss'], 
             'class_weight': [None, 'balanced'],
@@ -247,7 +254,26 @@ class Decision_Tree():
             n_jobs=-1,
             verbose=1
         )
-        grid_search.fit(X_train, y_train)
+        class_counts = Counter(y_train)
+
+        # 2. Use median class size as the balancing target
+        target_size = int(np.median(list(class_counts.values())))
+
+        # 3. Build sampling strategies
+        under_strategy = {cls: min(count, target_size) for cls, count in class_counts.items() if count > target_size}
+        over_strategy = {cls: target_size for cls, count in class_counts.items() if count < target_size}
+
+        # 4. Combine under + over sampling in a pipeline
+        resample_pipeline = Pipeline(steps=[
+            ('under', RandomUnderSampler(sampling_strategy=under_strategy, random_state=42)),
+            ('smote', SMOTE(sampling_strategy=over_strategy, random_state=42))
+        ])
+
+        # 5. Apply resampling
+        X_resampled, y_resampled = resample_pipeline.fit_resample(X_train, y_train)
+
+        # 6. Proceed with training
+        grid_search.fit(X_resampled, y_resampled)
 
         best_params = grid_search.best_params_
         print(f"Best parameters: {best_params}")
@@ -256,7 +282,8 @@ class Decision_Tree():
         # Time training of the best model only
         start_time = time.time()
         self.model = DecisionTreeClassifier(random_state=self.random_state, **best_params)
-        self.model.fit(X_train, y_train)
+        self.model.fit(X_resampled, y_resampled)
+
         end_time = time.time()
 
         self.time_taken = end_time - start_time
@@ -371,78 +398,125 @@ class Support_Vector_Machine():
         self.time_taken = model_data["time"]
 
 
+
 class XGBoost():
     def __init__(self, random_state=42, save_name="", cv=5):
         self.random_state = random_state
         self.save_path = save_name + ".pkl"
         self.cv = cv
         self.time_taken = None
+        self.model = None
 
     def fit_save(self, X_train, y_train):
+        # Suppress specific XGBoost warning
+        warnings.filterwarnings(
+            'ignore',
+            message=r".*Parameters: \{ 'predictor' \} are not used.*"
+        )
+
+        # Convert pandas to numpy
+        if isinstance(X_train, pd.DataFrame):
+            X_arr = X_train.values
+            y_arr = y_train.values
+        else:
+            X_arr = X_train
+            y_arr = y_train
+
+        # Determine number of classes for multiclass
+        classes = np.unique(y_arr)
+        n_classes = len(classes)
+
         # Define hyperparameter grid
+    #     param_grid = {
+    #         'n_estimators': [75,100],
+    #         'max_depth':    [3,7],
+    #         'learning_rate':[0.01,0.1,2],
+    #         'subsample':   [0.8, 1.0],
+    #         'colsample_bytree': [0.7,1.0],
+    #         'gamma':       [0.1],
+    #         'reg_lambda':  [1.5, 2.0],
+    #         'reg_alpha':   [1.5]
+    #     }
         param_grid = {
-            'n_estimators': [50, 75, 100, 150],
-            'max_depth': [3, 5, 7],
-            'learning_rate': [0.01, 0.1, 0.2],
-            'subsample': [0.7, 0.8, 1.0],
-            'colsample_bytree': [0.7, 0.8, 1.0],
-            'gamma': [0, 0.1, 0.2, 0.25, 0.3],
-            'reg_lambda': [1, 1.5, 2],
-            'reg_alpha': [0, 0.5, 1, 1.5, 2]
+            'n_estimators': [75, 100],
+            'max_depth': [3, 7],
+            'learning_rate': [0.01, 0.1, 2],
+            'subsample': [0.8, 1.0],
+            'colsample_bytree': [0.7, 1.0],
+            'gamma': [0.1],
+            'reg_lambda': [1.5, 2.0],
+            'reg_alpha': [1.5]
         }
 
-        # Use F1 Macro as scoring metric
-        scorer = make_scorer(f1_score, average='macro')
+        # Prepare cross-validation and scorer
+        kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
+        scorer = make_scorer(f1_score, average='macro')  # works for multiclass
 
-        # Grid search (not timed)
-        grid_search = GridSearchCV(
-            estimator=XGBClassifier(
-                random_state=self.random_state,
-                use_label_encoder=False,
-                eval_metric='mlogloss'
-            ),
-            param_grid=param_grid,
-            scoring=scorer,
-            cv=self.cv,
-            n_jobs=-1,
-            verbose=1
-        )
-        grid_search.fit(X_train, y_train)
+        best_score = -np.inf
+        best_params = None
 
-        best_params = grid_search.best_params_
-        print(f"Best parameters: {best_params}")
-        print(f"Best macro F1-score from CV: {grid_search.best_score_}")
+        # Manual grid search
+        for params in ParameterGrid(param_grid):
+            fold_scores = []
+            for train_idx, val_idx in kf.split(X_arr):
+                X_tr, X_val = X_arr[train_idx], X_arr[val_idx]
+                y_tr, y_val = y_arr[train_idx], y_arr[val_idx]
 
-        # Time training of the best model only
+                clf = XGBClassifier(
+                    random_state=self.random_state,
+                    objective='multi:softprob',        # multiclass objective
+                    num_class=n_classes,
+                    eval_metric='mlogloss',
+                    tree_method='hist',               # CPU
+                    **params
+                )
+                clf.fit(X_tr, y_tr)
+
+                y_pred = clf.predict(X_val)
+                score = scorer._score_func(y_val, y_pred)
+                fold_scores.append(0.0 if np.isnan(score) else score)
+
+            mean_score = np.mean(fold_scores)
+            print(f"Params: {params} -> Mean F1: {mean_score:.4f}")
+
+            if mean_score > best_score:
+                best_score = mean_score
+                best_params = params
+
+        print(f"Best params: {best_params}, Best F1: {best_score:.4f}")
+
+        # Retrain on full data
         start_time = time.time()
         self.model = XGBClassifier(
             random_state=self.random_state,
-            use_label_encoder=False,
+            objective='multi:softprob',
+            num_class=n_classes,
             eval_metric='mlogloss',
+            tree_method='hist',
             **best_params
         )
-        self.model.fit(X_train, y_train)
-        end_time = time.time()
+        self.model.fit(X_arr, y_arr)
+        self.time_taken = time.time() - start_time
 
-        self.time_taken = end_time - start_time
-
-        model_data = {
-            "model": self.model,
-            "time": self.time_taken
-        }
-
-        jlb.dump(model_data, self.save_path)
-        print(f"Saved best model to {self.save_path}")
-        print(f"Training time for best model: {self.time_taken:.4f} seconds")
+        # Save model and timing
+        jlb.dump({'model': self.model, 'time': self.time_taken}, self.save_path)
+        print(f"Model saved to {self.save_path}")
+        print(f"Training time: {self.time_taken:.2f}s")
 
     def predict(self, X_test):
-        return self.model.predict(X_test)
-    def evaluate_and_get_metrics(self, X_test, y_test,plt_name):
+        if isinstance(X_test, pd.DataFrame):
+            X_vals = X_test.values
+        else:
+            X_vals = X_test
+        return self.model.predict(X_vals)
+
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
         y_pred = self.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
-        y_proba = self.model.predict_proba(X_test)
-       
-        metrics = Metric(
+        arr = X_test.values if isinstance(X_test, pd.DataFrame) else X_test
+        y_proba = self.model.predict_proba(arr)
+
+        return Metric(
             accuracy=accuracy,
             y_test=y_test,
             y_pred=y_pred,
@@ -451,12 +525,14 @@ class XGBoost():
             save_dir=plt_name,
         )
 
-        return metrics
-
     def evaluation_mode(self, model_path):
-        model_data = jlb.load(model_path)
-        self.model = model_data["model"]
-        self.time_taken = model_data["time"]
+        data = jlb.load(model_path)
+        self.model = data['model']
+        self.time_taken = data['time']
+
+    
+
+
 
 
 class K_Nearest_Neighbor():
