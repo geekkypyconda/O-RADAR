@@ -24,7 +24,7 @@ dataset = None
 
 def extract_dataset_name():
     global dataset_path
-    file_name = os.path.basename(dataset_path)
+    file_name = os.path.basename(dataset_path).split(".")[0]
     return file_name
 
 def main():
@@ -81,8 +81,9 @@ def main():
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
     fn = extract_dataset_name()
-    fn = fn + "_" + drop_dup
-
+    print(f"Final Name: {fn}")
+    fn = fn + "_" + drop_dup + ".csv"
+    
     if len(sys.argv) == 4:
         fn = sys.argv[3]
 

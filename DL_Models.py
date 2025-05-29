@@ -35,10 +35,11 @@ import h5py
 
 import tensorflow as tf
 from tensorflow.keras.models import Sequential # type: ignore
-from tensorflow.keras.layers import LSTM, Dense, Dropout, Input # type: ignore
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input, BatchNormalization # type: ignore
+from tensorflow.keras.regularizers import l2 # type: ignore
 
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+#os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
 print("\n\n\n<<<<<<<<<<<<<<----------------------------------->>>>>>>>>>>>>>>>>>>")
 print("TensorFlow version:", tf.__version__)
@@ -235,12 +236,20 @@ class MLP(nn.Module):
 
 
 class Simple_LSTM():
-    def __init__(self, timesteps = None, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
+    def __init__(self, num_labels=-1, timesteps = 1, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
         self.save_path = save_name + ".h5"
         self.learning_rate = learning_rate
         self.epochs = epochs
         self.number_of_features = number_of_features
         self.timesteps = timesteps
+        self.num_labels = num_labels
+
+        if(self.num_labels == 2):
+            self.classification_type = "binary"
+        else:
+            self.classification_type = "multi-class"
+
+        self.loss_function = 'binary_crossentropy' if self.classification_type == "binary" else 'sparse_categorical_crossentropy'
 
         self.batch_size = batch_size
 
@@ -250,15 +259,34 @@ class Simple_LSTM():
             self._init_model_()
 
     def _init_model_(self):
-        self.model = Sequential([
-            LSTM(50, activation='relu', return_sequences=True, input_shape=(self.timesteps, self.number_of_features)),
-            Dropout(0.2),
-            LSTM(32, activation='relu'),
-            Dropout(0.2),
-            Dense(1, activation='sigmoid') 
-        ])
+        if(self.classification_type == "binary"):
+            self.model = Sequential([
+                LSTM(64, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01), input_shape=(self.timesteps, self.number_of_features)),
+                BatchNormalization(),
+                Dropout(0.4),  # Dropout to prevent overfitting
 
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+                LSTM(32, activation='relu', kernel_regularizer=l2(0.01)),
+                BatchNormalization(),
+                Dropout(0.3),  # Dropout after second LSTM layer
+
+                Dense(1, activation='sigmoid')  # Output layer for binary classification
+
+            ])
+        else:
+            self.model = Sequential([
+                LSTM(128, activation='relu', return_sequences=True, kernel_regularizer=l2(0.01), input_shape=(self.timesteps, self.number_of_features)),
+                BatchNormalization(),
+                Dropout(0.4),  
+
+                LSTM(64, activation='relu', kernel_regularizer=l2(0.01)),
+                BatchNormalization(),
+                Dropout(0.3), 
+
+                Dense(self.num_labels, activation='softmax')  
+            ])
+
+        
+        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss=self.loss_function, metrics=['accuracy'])
 
     def transform_label(self, labels,sample_set_size):
         y_seq = (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
@@ -266,14 +294,8 @@ class Simple_LSTM():
         return y_seq
 
     def fit_save(self,X_train, y_train):
-        sample_set_size = X_train.shape[0] // self.timesteps
+        X_train = X_train.to_numpy().reshape((X_train.shape[0],self.timesteps,X_train.shape[1]))        
 
-        X_train = X_train[:sample_set_size * self.timesteps]
-        y_train = y_train[:sample_set_size * self.timesteps]
-
-        y_train = self.transform_label(labels=y_train, sample_set_size=sample_set_size)
-
-        X_train = X_train.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
         start_time = time.time()
 
         self.history = self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size)
@@ -281,34 +303,41 @@ class Simple_LSTM():
         end_time = time.time()
 
         self.time_taken = end_time - start_time
-        
+
         self.model.save(self.save_path)
-        
+
         with h5py.File(self.save_path, "a") as file:
             file.attrs["time"] = self.time_taken
             file.attrs["timesteps"] = self.timesteps
             file.attrs["num_features"] = self.number_of_features
+            file.attrs["num_classes"] = self.num_labels
 
     def predict_proba(self, X_test):
         return self.model.predict(X_test)
 
     def predict(self, X_test):
-        probs = self.model.predict_proba(X_test)
-        return (probs > 0.5).astype(int)
+        probs = self.predict_proba(X_test)
+        y_pred = None
+        y_probs = None
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
-        sample_set_size = X_test.shape[0] // self.timesteps
-        X_test = X_test[:sample_set_size * self.timesteps]
-        y_test = y_test[:sample_set_size * self.timesteps]
+        if(self.num_labels == 2):
+            y_pred = (probs > 0.5).astype(int)
+            y_probs = np.hstack([probs, 1 - probs])
+        else:
+            y_pred = np.argmax(probs,axis=1)
+            y_probs = probs
 
-        y_test = self.transform_label(labels = y_test, sample_set_size=sample_set_size)
 
-        X_test = X_test.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
-        y_pred = self.model.predict(X_test)
+        return y_pred, y_probs
+
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
+        X_test = X_test.to_numpy().reshape((X_test.shape[0],self.timesteps,X_test.shape[1]))
+        y_pred, y_probs = self.predict(X_test)
+
         loss, acc = self.model.evaluate(X_test,y_test)
 
         # Defining Metrics for this model
-        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
+        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken,save_dir=plt_name, y_proba=y_probs)
 
         return self.metrics
 
@@ -319,93 +348,7 @@ class Simple_LSTM():
             self.time_taken = file.attrs["time"]
             self.timesteps = file.attrs["timesteps"]
             self.number_of_features = file.attrs["num_features"]
-
-
-class Simple_LSTM():
-    def __init__(self, timesteps = None, number_of_features = None, learning_rate=0.01, epochs = 100, batch_size = 32, save_name = ""):
-        self.save_path = save_name + ".h5"
-        self.learning_rate = learning_rate
-        self.epochs = epochs
-        self.number_of_features = number_of_features
-        self.timesteps = timesteps
-
-        self.batch_size = batch_size
-
-        if save_name == "":
-            pass
-        else:
-            self._init_model_()
-
-    def _init_model_(self):
-        self.model = Sequential([
-            LSTM(50, activation='relu', return_sequences=True, input_shape=(self.timesteps, self.number_of_features)),
-            Dropout(0.2),
-            LSTM(32, activation='relu'),
-            Dropout(0.2),
-            Dense(1, activation='sigmoid') 
-        ])
-
-        self.model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
-
-    def transform_label(self, labels,sample_set_size):
-        y_seq = (labels.to_numpy().reshape(sample_set_size, self.timesteps).mean(axis=1) >= 0.5).astype(int)
-
-        return y_seq
-
-    def fit_save(self,X_train, y_train):
-        sample_set_size = X_train.shape[0] // self.timesteps
-
-        X_train = X_train[:sample_set_size * self.timesteps]
-        y_train = y_train[:sample_set_size * self.timesteps]
-
-        y_train = self.transform_label(labels=y_train, sample_set_size=sample_set_size)
-
-        X_train = X_train.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
-        start_time = time.time()
-
-        self.history = self.model.fit(X_train, y_train, epochs=self.epochs, batch_size=self.batch_size)
-
-        end_time = time.time()
-
-        self.time_taken = end_time - start_time
-        
-        self.model.save(self.save_path)
-        
-        with h5py.File(self.save_path, "a") as file:
-            file.attrs["time"] = self.time_taken
-            file.attrs["timesteps"] = self.timesteps
-            file.attrs["num_features"] = self.number_of_features
-
-    def predict_proba(self, X_test):
-        return self.model.predict(X_test)
-
-    def predict(self, X_test):
-        probs = self.model.predict_proba(X_test)
-        return (probs > 0.5).astype(int)
-
-    def evaluate_and_get_metrics(self, X_test, y_test):
-        sample_set_size = X_test.shape[0] // self.timesteps
-        X_test = X_test[:sample_set_size * self.timesteps]
-        y_test = y_test[:sample_set_size * self.timesteps]
-
-        y_test = self.transform_label(labels = y_test, sample_set_size=sample_set_size)
-
-        X_test = X_test.to_numpy().reshape((sample_set_size, self.timesteps, self.number_of_features))
-        y_pred = self.model.predict(X_test)
-        loss, acc = self.model.evaluate(X_test,y_test)
-
-        # Defining Metrics for this model
-        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
-
-        return self.metrics
-
-    def evaluation_mode(self, model_path):
-        self.model = tf.keras.models.load_model(model_path)
-
-        with h5py.File(model_path, "r") as file:
-            self.time_taken = file.attrs["time"]
-            self.timesteps = file.attrs["timesteps"]
-            self.number_of_features = file.attrs["num_features"]
+            self.num_labels = file.attrs["num_classes"]
 
 class Autoencoder(nn.Module):
     def __init__(self, input_dimension, encoded_dimension):
@@ -434,19 +377,40 @@ class Classifier(nn.Module):
     def __init__(self, encoded_dimension,number_of_classes):
         super(Classifier,self).__init__()
 
-        self.net = nn.Sequential(
-            nn.Linear(encoded_dimension,16),
-            nn.ReLU(),
-            nn.Linear(16, 1),
-            nn.Sigmoid()
-        )
+        if(number_of_classes == 2): 
+            self.net = nn.Sequential(
+                nn.Linear(encoded_dimension, 128),  
+                nn.ReLU(),
+                nn.Dropout(0.4),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(64, 32),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(32, 1),
+                nn.Sigmoid()
+            )
+        else:
+            self.net = nn.Sequential(
+                nn.Linear(encoded_dimension, 128),  
+                nn.ReLU(),
+                nn.Dropout(0.4),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(64, 32),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(32, number_of_classes),
+            )
 
     def forward(self, x):
         return self.net(x)
 
 
 class Autoencoder_Classifier():
-    def __init__(self, X_train = -1, y_train = -1, input_dimension = -1, encoded_dimension = -1,number_of_classes = -1, autoencoder_learning_rate=0.01, save_name = ""):
+    def __init__(self, X_train = -1, y_train = -1, input_dimension = -1, encoded_dimension = -1,number_of_classes = -1, save_name = ""):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device:", self.device)
         
@@ -463,17 +427,23 @@ class Autoencoder_Classifier():
         
             self.X_train_tensor = self.to_tensor(X_train, False)
             self.y_train_tensor = self.to_tensor(y_train, isLabel=True)
-       
+            print(f"Tensor: {self.y_train_tensor}")
+
 
     def to_tensor(self, X,isLabel):
         if isLabel == True:
-            X = torch.tensor(X.to_numpy(), dtype=torch.float32).view(-1, 1).to(self.device)
+            if self.number_of_classes == 2:
+                X = torch.tensor(X.to_numpy(), dtype=torch.float32).view(-1, 1).to(self.device)
+            else:
+                X = torch.tensor(X.to_numpy(), dtype=torch.long).view(-1).to(self.device)
         else:
             X = torch.tensor(X.to_numpy(), dtype=torch.float32).to(self.device)
 
         return X
 
     def train_autoencoder(self, epochs = 100, learning_rate = 0.001):
+        print("\n\n--------------Training Autoencoder--------\n\n")
+
         self.ae_criterion = nn.MSELoss()
         self.ae_optimizer = optim.Adam(self.autoencoder.parameters(), lr=learning_rate)
         print_num = epochs // 10
@@ -501,8 +471,16 @@ class Autoencoder_Classifier():
 
         self.encoded_train = self.autoencoder.encoder(self.X_train_tensor).detach()
 
-    def train_classifier(self, epochs = 100, learning_rate=0.001):
-        self.clf_criterion = nn.BCEWithLogitsLoss()
+    def train_classifier(self, epochs = 100, learning_rate=0.01):
+        print("\n\n--------------Training Classifier--------\n\n")
+
+        
+
+        if(self.number_of_classes == 2):
+            self.clf_criterion = nn.BCEWithLogitsLoss()
+        else:
+            self.clf_criterion = nn.CrossEntropyLoss()
+
         self.clf_optimizer = optim.Adam(self.classifier.parameters(), lr=learning_rate)
         print_num = epochs // 10
 
@@ -543,19 +521,33 @@ class Autoencoder_Classifier():
         torch.save(model_data, self.save_path)
 
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
         X_test_tensor = self.to_tensor(X=X_test, isLabel=False)
         y_test_tensor = self.to_tensor(X=y_test, isLabel=True)
 
+        y_probs = None
+        y_pred_tensor = None
+
         with torch.no_grad():
             encoded_output = self.autoencoder.encoder(X_test_tensor)
-            y_pred_tensor = (self.classifier(encoded_output) > 0.5).float()
+
+            if(self.number_of_classes == 2):
+                probs_1 = self.classifier(encoded_output).view(-1,1)
+                probs_0 = 1 - probs_1
+                y_probs = torch.cat([probs_0, probs_1], dim=1) 
+                y_pred_tensor = (probs_1 > 0.5).int()  
+            else:
+                y_probs = self.classifier(encoded_output)
+                y_pred_tensor = torch.argmax(y_probs, dim=1)
 
         y_pred = y_pred_tensor.cpu().numpy().astype(int)
+        y_probs = y_probs.cpu().numpy().astype(float)
+
+        print(f"probs: {y_probs}")
 
         accuracy = accuracy_score(y_test_tensor.cpu().numpy(), y_pred_tensor.cpu().numpy())
 
-        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken)
+        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken, save_dir=plt_name, y_proba=y_probs)
 
         return metrics
 
@@ -579,7 +571,7 @@ class Autoencoder_Classifier():
 
 
 class TabNet_Classifier():
-    def __init__(self, n_steps=10, n_d=16, n_a=16,save_name = ""):
+    def __init__(self, n_steps=6, n_d=32, n_a=32,save_name = ""):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Using device: ", self.device)
     
@@ -590,10 +582,10 @@ class TabNet_Classifier():
                 device_name=self.device.type,
                 n_d=n_d,n_a=n_a,
                 n_steps=n_steps,
-                gamma=1.5,
-                lambda_sparse=1e-4,
+                gamma=1.6,
+                lambda_sparse=1e-3,
                 optimizer_fn=torch.optim.Adam,
-                optimizer_params=dict(lr=2e-2),
+                optimizer_params=dict(lr=2e-2, weight_decay=1e-4),
                 scheduler_params={"step_size":10, "gamma":0.9},
                 scheduler_fn=torch.optim.lr_scheduler.StepLR,
                 verbose=1
@@ -606,7 +598,7 @@ class TabNet_Classifier():
             X_train=X_train.values, y_train=y_train.values,
             eval_set=[(X_test.values, y_test.values)],
             eval_name=['test'],
-            eval_metric=['accuracy'],
+            eval_metric=['auc'],
             max_epochs=epochs,
             patience=early_stopping_threshold,
             batch_size=256,
@@ -628,12 +620,14 @@ class TabNet_Classifier():
     def predict(self,X):
         return self.clf.predict(X)
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
         y_pred = self.predict(X_test.values)
+        y_probs = self.clf.predict_proba(X_test.values)
+
         acc = accuracy_score(y_test, y_pred)
 
         # Defining Metrics for this model
-        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken)
+        self.metrics = Metric(accuracy=acc, y_test=y_test, y_pred=y_pred,time_taken=self.time_taken,save_dir=plt_name, y_proba=y_probs)
 
         return self.metrics
 
@@ -670,11 +664,20 @@ class Isolation_Forest():
 
         return y_pred
 
-    def evaluate_and_get_metrics(self, X_test, y_test):
+    def predict_proba(self,X_test):
+        scores = self.model.decision_function(X=X_test)
+
+        outlier_probs = 1 / (1 + np.exp(scores))
+        inlier_probs = 1 - outlier_probs
+
+        return np.column_stack((outlier_probs, inlier_probs))
+
+    def evaluate_and_get_metrics(self, X_test, y_test, plt_name):
         y_pred = self.predict(X_test=X_test)
+        y_probs = self.predict_proba(X_test)
         accuracy = accuracy_score(y_test, y_pred)
 
-        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken)
+        metrics = Metric(accuracy=accuracy, y_test=y_test,y_pred=y_pred,time_taken=self.time_taken, save_dir=plt_name, y_proba=y_probs)
 
         return metrics
 

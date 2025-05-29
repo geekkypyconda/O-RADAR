@@ -397,21 +397,12 @@ class Plotter():
 
 
 class Metric():
-<<<<<<< HEAD
-    def __init__(self, accuracy, y_test, y_pred, time_taken, num_labels):
-        self.accuracy = accuracy
-        self.time_taken = time_taken
-        self.f1 = f1_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
-        self.precision = precision_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
-        self.recall = recall_score(y_test, y_pred, average="binary" if num_labels == 2 else "macro")
-=======
     def __init__(self, accuracy, y_test, y_pred, time_taken, y_proba=None,save_dir=None):
         self.accuracy = accuracy
         self.time_taken = time_taken
         self.f1 = f1_score(y_test, y_pred, average='weighted')
         self.precision = precision_score(y_test, y_pred, average='weighted')
         self.recall = recall_score(y_test, y_pred, average='weighted')
->>>>>>> ML_models
         self.cf_matrix = confusion_matrix(y_test, y_pred)
         self.macro_f1 = f1_score(y_test, y_pred, average='macro')
         self.save_dir=save_dir
@@ -474,7 +465,7 @@ class Metric():
             plt.legend()
             plt.grid(True)
             plt.savefig(f'plots/{self.save_dir}@roc_curve.png')
-            plt.show()
+            # plt.show()
 
             precision, recall, _ = precision_recall_curve(self.y_test, self.y_proba[:, 1])
             plt.figure(figsize=(12,5))
@@ -485,7 +476,7 @@ class Metric():
             plt.legend()
             plt.grid(True)
             plt.savefig(f'plots/{self.save_dir}@PR_curve.png')
-            plt.show()
+            # plt.show()
 
         else:
             # Multi-class case (your existing code)
