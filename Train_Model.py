@@ -91,12 +91,11 @@ def run_model(model_num, dataset_path,X_train,y_train,X_test,y_test):
     elif model_num == 9:
         model = MLP(number_of_features=X_train.shape[1],learning_rate=0.001, save_name=save_name)
     elif model_num == 10: # We have to give 1 timestep, because our dataset is like that only
-        model = Simple_LSTM(num_labels=number_of_classes, timesteps=1, number_of_features=X_train.shape[1],learning_rate=0.01,epochs=100, batch_size=32,save_name=save_name)
+        model = Simple_LSTM(num_classes=number_of_classes, timesteps=1, number_of_features=X_train.shape[1],learning_rate=0.01,epochs=100, batch_size=32,save_name=save_name)
     elif model_num == 12:
         model = Autoencoder_Classifier(X_train=X_train,y_train=y_train,input_dimension=input_dimension, encoded_dimension=24, number_of_classes=number_of_classes, save_name=save_name)
     elif model_num == 13:
         model = TabNet_Classifier(save_name=save_name)
-        model = MLP(number_of_features=X_train.shape[1],learning_rate=0.01, save_name=save_name)
     
 
     if model_num == 4:

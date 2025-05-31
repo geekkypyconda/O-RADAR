@@ -332,9 +332,9 @@ class Support_Vector_Machine():
     def fit_save(self, X_train, y_train):
         # Define parameter grid for SVM
         param_grid = {
-            'kernel': ['linear', 'poly', 'rbf', 'sigmoid'],
-            'C': [0.1, 1, 10],
-            'gamma': ['scale', 'auto']
+            'kernel': ['linear'],#, 'poly', 'rbf', 'sigmoid'],
+            'C': [0.1],#, 1, 10],
+            'gamma': ['auto'] #'scale',
         }
 
         scorer = make_scorer(f1_score, average='macro')
@@ -409,10 +409,7 @@ class XGBoost():
 
     def fit_save(self, X_train, y_train):
         # Suppress specific XGBoost warning
-        warnings.filterwarnings(
-            'ignore',
-            message=r".*Parameters: \{ 'predictor' \} are not used.*"
-        )
+
 
         # Convert pandas to numpy
         if isinstance(X_train, pd.DataFrame):
@@ -425,32 +422,40 @@ class XGBoost():
         # Determine number of classes for multiclass
         classes = np.unique(y_arr)
         n_classes = len(classes)
-
+        is_binary = (n_classes == 2)
+        if is_binary:
+            # For binary problems, use 'binary:logistic'
+            objective_str = 'binary:logistic'
+            f1_average_type = 'binary'
+        else:
+            # For multiclass, use 'multi:softprob'
+            objective_str = 'multi:softprob'
+            f1_average_type = 'macro'
         # Define hyperparameter grid
-    #     param_grid = {
-    #         'n_estimators': [75,100],
-    #         'max_depth':    [3,7],
-    #         'learning_rate':[0.01,0.1,2],
-    #         'subsample':   [0.8, 1.0],
-    #         'colsample_bytree': [0.7,1.0],
-    #         'gamma':       [0.1],
-    #         'reg_lambda':  [1.5, 2.0],
-    #         'reg_alpha':   [1.5]
-    #     }
         param_grid = {
-            'n_estimators': [75, 100],
-            'max_depth': [3, 7],
-            'learning_rate': [0.01, 0.1, 2],
-            'subsample': [0.8, 1.0],
-            'colsample_bytree': [0.7, 1.0],
-            'gamma': [0.1],
-            'reg_lambda': [1.5, 2.0],
-            'reg_alpha': [1.5]
+            'n_estimators': [75,100],
+            'max_depth':    [3,7],
+            'learning_rate':[0.01,0.1,2],
+            'subsample':   [0.8, 1.0],
+            'colsample_bytree': [0.7,1.0],
+            'gamma':       [0.1],
+            'reg_lambda':  [1.5, 2.0],
+            'reg_alpha':   [1.5]
         }
+        # param_grid = {
+        #     'n_estimators': [75],# 100],
+        #     'max_depth': [3],# 7],
+        #     'learning_rate': [0.01],# 0.1, 2],
+        #     'subsample': [0.8],# 1.0],
+        #     'colsample_bytree': [0.7],# 1.0],
+        #     'gamma': [0.1],
+        #     'reg_lambda': [1.5],# 2.0],
+        #     'reg_alpha': [1.5]
+        # }
 
         # Prepare cross-validation and scorer
         kf = KFold(n_splits=self.cv, shuffle=True, random_state=self.random_state)
-        scorer = make_scorer(f1_score, average='macro')  # works for multiclass
+        #scorer = make_scorer(f1_score, average='macro')  # works for multiclass
 
         best_score = -np.inf
         best_params = None
@@ -462,18 +467,24 @@ class XGBoost():
                 X_tr, X_val = X_arr[train_idx], X_arr[val_idx]
                 y_tr, y_val = y_arr[train_idx], y_arr[val_idx]
 
-                clf = XGBClassifier(
-                    random_state=self.random_state,
-                    objective='multi:softprob',        # multiclass objective
-                    num_class=n_classes,
-                    eval_metric='mlogloss',
-                    tree_method='hist',               # CPU
+                clf_args = {
+                    'random_state': self.random_state,
+                    'objective': objective_str,
+                    'eval_metric': 'mlogloss',
+                    'tree_method': 'hist',
                     **params
-                )
+                }
+                if not is_binary:
+                    clf_args['num_class'] = n_classes
+
+                clf = XGBClassifier(**clf_args)
+
+                
                 clf.fit(X_tr, y_tr)
 
                 y_pred = clf.predict(X_val)
-                score = scorer._score_func(y_val, y_pred)
+                #score = scorer._score_func(y_val, y_pred)
+                score = f1_score(y_val, y_pred, average=f1_average_type)
                 fold_scores.append(0.0 if np.isnan(score) else score)
 
             mean_score = np.mean(fold_scores)
@@ -487,14 +498,18 @@ class XGBoost():
 
         # Retrain on full data
         start_time = time.time()
-        self.model = XGBClassifier(
-            random_state=self.random_state,
-            objective='multi:softprob',
-            num_class=n_classes,
-            eval_metric='mlogloss',
-            tree_method='hist',
-            **best_params
-        )
+        clf_args = {
+            'random_state': self.random_state,
+            'objective': objective_str,
+            'eval_metric': 'mlogloss',
+            'tree_method': 'hist',
+            **params
+        }
+        if not is_binary:
+            clf_args['num_class'] = n_classes
+
+        self.model= XGBClassifier(**clf_args)
+
         self.model.fit(X_arr, y_arr)
         self.time_taken = time.time() - start_time
 
